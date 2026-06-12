@@ -112,3 +112,13 @@
 - [ ] Verify one row signal update does not rebuild sibling rows.
 - [ ] Verify frame/cursor signal updates do not rebuild owner component.
 - [ ] Verify large batched updates produce one Yoga calculation and one command compile per dirty root.
+
+## 11. Showcase Metrics Feature Test
+
+- [ ] Add `test/feature/test_showcase_metrics.lua`.
+- [ ] Build the showcase from real component shapes rather than synthetic demo-only widgets.
+- [ ] Adapt component showcase/test_components style cases where they still represent Miru behavior.
+- [ ] Adapt real-world component shapes such as button, switch, dropdown, text field and preference panels.
+- [ ] Add an on-screen metrics panel for component builds, binding runs, Yoga runs, text rebuilds, canvas rebuilds and root command compiles.
+- [ ] Add manual scenarios for hover/pressed/open, text input cursor/frame, single keyed row update, draw-only prop update, layout prop update and batched writes.
+- [ ] Add focused assertions for the key metrics while keeping the feature test useful for visual inspection.

@@ -231,3 +231,33 @@ Test layers:
 - Performance tests: counters for component builds, binding runs, Yoga runs, command compiles.
 
 The key metric is not total FPS. The key metric is whether an update touches only the graph nodes that semantically depend on the changed signal.
+
+### Showcase Metrics Feature Test
+
+最终需要一个可交互的 feature test，用来直观看到 signal-native runtime 的实际效果。这个测试不是人工拼出来的 demo 面板，而应该优先使用真实组件样本：现有 component showcase/test_components 形态，以及 Ishiku 中实际使用过的 button、switch、dropdown、text_field、preference 等组件形态。
+
+建议入口：
+
+```text
+test/feature/test_showcase_metrics.lua
+```
+
+运行后应展示一组典型组件和一个 metrics 面板。metrics 至少包含：
+
+- component build count
+- binding run count
+- Yoga layout count
+- text command rebuild count
+- canvas rebuild count
+- root command compile count
+
+测试应提供几类可手动触发的场景：
+
+- hover/pressed/open 这类局部交互状态。
+- text field cursor/frame、selection、input text 更新。
+- keyed list 中单个 row 的 signal 更新。
+- draw-only prop 更新。
+- layout prop 更新。
+- 批量 signal 写入。
+
+验收重点是让人能直观看到更新粒度：局部状态变化只推动相关 binding/text/canvas/layout 计数，而不是让无关组件或整棵树一起 rebuild。自动断言可以覆盖关键指标，但这个 feature test 的主要价值是可运行、可观察、可比较。
