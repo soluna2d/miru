@@ -1,0 +1,4 @@
+interface:
+  display_name: "Miru"
+  short_description: "Signal-native Soluna UI runtime guidance"
+  default_prompt: "Use $miru when modifying the Miru Lua UI runtime, plans, examples, tests, or skills."
