@@ -23,11 +23,11 @@
 
 ## 2. Runtime Ownership
 
-- [ ] Define owner scopes for root, component, host binding, control-flow range, canvas and animation.
-- [ ] Ensure every owner can register cleanup callbacks.
-- [ ] Stop all owned effects when a node/range/component is destroyed.
-- [ ] Add diagnostics for reading signals directly in component build scope.
-- [ ] Add tests for component-owned signals driving explicit binding and dirty owners.
+- [x] Define owner scopes for root, component, host binding, control-flow range, canvas and animation.
+- [x] Ensure every owner can register cleanup callbacks.
+- [x] Stop all owned effects when a node/range/component is destroyed.
+- [x] Add diagnostics for reading signals directly in component build scope.
+- [x] Add tests for component-owned signals driving explicit binding and dirty owners.
 
 ## 3. Retained Tree
 
@@ -42,8 +42,8 @@
 ## 4. Host Prop Binding
 
 - [ ] Split prop keys into structure, layout, paint, transform, interaction and internal categories.
-- [ ] Store raw props and resolved props separately.
-- [ ] Create binding effects for reactive prop values.
+- [x] Store raw props and resolved props separately.
+- [x] Create binding effects for reactive prop values.
 - [ ] Mark layout dirty only when resolved layout props change.
 - [ ] Mark paint dirty only when resolved draw props change.
 - [ ] Rebuild text command only when text or text rendering inputs change.
@@ -63,7 +63,7 @@
 
 ## 6. Text And Canvas
 
-- [ ] Make `text(source, props)` accept static source or reactive source.
+- [x] Make `text(source, props)` accept static source or reactive source.
 - [ ] Add text command cache keyed by text rendering inputs.
 - [ ] Run `canvas(draw)` in its own reactive binding scope.
 - [ ] Rebuild a canvas command list when its signal dependencies change.

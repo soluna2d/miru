@@ -6,6 +6,24 @@ local args = ...
 local checked = miru.signal(args.checked == true)
 local hovered = miru.hovered()
 local pressed = miru.pressed()
+local enabled = miru.memo(function()
+	return args.enabled ~= false
+end)
+local width = args.width or 56
+local height = args.height or 30
+local knob = args.knob_size or 22
+local fill = miru.memo(function()
+	if not enabled() then
+		return args.disabled_background or 0xffe5e7eb
+	end
+	if checked() then
+		return (hovered() or pressed()) and 0xff1d4ed8 or 0xff2563eb
+	end
+	return (hovered() or pressed()) and 0xffcbd5e1 or 0xffd1d5db
+end)
+local knob_left = miru.memo(function()
+	return checked() and (width - knob - 4) or 4
+end)
 
 miru.clickable {
 	enabled = args.enabled,
@@ -19,20 +37,6 @@ miru.clickable {
 }
 
 return function()
-	local enabled = args.enabled ~= false
-	local width = args.width or 56
-	local height = args.height or 30
-	local knob = args.knob_size or 22
-	local fill
-	if not enabled then
-		fill = args.disabled_background or 0xffe5e7eb
-	elseif checked() then
-		fill = (hovered() or pressed()) and 0xff1d4ed8 or 0xff2563eb
-	else
-		fill = (hovered() or pressed()) and 0xffcbd5e1 or 0xffd1d5db
-	end
-	local knob_left = checked() and (width - knob - 4) or 4
-
 	surface({
 		width = width,
 		height = height,

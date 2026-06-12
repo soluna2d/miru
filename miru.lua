@@ -35,6 +35,7 @@ local COMPONENT_PATH <const> = "?.lua;?/init.lua"
 ---@field listed boolean?
 ---@field stopped boolean?
 ---@field effect ViewEffect?
+---@field owner_scope ViewOwner?
 
 ---@class ViewTransitionRenderState
 ---@field show boolean
@@ -59,9 +60,16 @@ local COMPONENT_PATH <const> = "?.lua;?/init.lua"
 ---@field draw fun(width: number, height: number)?
 ---@field commands ViewCommand[]?
 ---@field props table?
+---@field raw_props table?
+---@field direction string?
 ---@field text any
+---@field text_source any
 ---@field ref ViewRef?
 ---@field transition ViewTransitionState?
+---@field prop_effect ViewEffect?
+---@field text_effect ViewEffect?
+---@field owner_scope ViewOwner?
+---@field canvas_owner ViewOwner?
 
 ---@class ViewLayout
 ---@field x number?
@@ -135,6 +143,7 @@ local compile_render_tree
 ---@field hovered ViewValue<boolean>?
 ---@field pressed ViewValue<boolean>?
 ---@field ref ViewRef?
+---@field owner_scope ViewOwner?
 
 ---@class (partial) View
 ---@field scope ViewScope
@@ -159,6 +168,7 @@ local compile_render_tree
 ---@field disposables ViewDisposable[]?
 ---@field drawing boolean?
 ---@field rendering boolean?
+---@field owner ViewOwner?
 
 ---@class ViewRenderContext
 ---@field view View
@@ -193,6 +203,8 @@ local compile_render_tree
 
 ---@class ViewStatistics
 ---@field render_count integer
+---@field binding_count integer
+---@field command_compile_count integer
 
 ---@class (partial) ViewRef
 ---A component-owned geometry handle. `rect()` returns owner-local coordinates.
@@ -226,6 +238,16 @@ local compile_render_tree
 ---@field transition fun(props: table, children: fun(state: ViewTransitionRenderState))
 ---@field lerp fun(a: number, b: number, t: number): number
 ---@field lerp_color fun(a: integer, b: integer, t: number): integer
+---@field cleanup fun(fn: fun())
+
+---@class ViewOwner
+---@field kind string
+---@field view View
+---@field parent ViewOwner?
+---@field instance ViewInstance?
+---@field node ViewRenderNode?
+---@field cleanups any[]
+---@field stopped boolean?
 
 ---@type ViewContext?
 local active
@@ -235,6 +257,118 @@ local active_render
 
 ---@type ViewCommand[]?
 local active_batch
+
+---@param owner ViewOwner
+---@param base ViewContext?
+---@return ViewContext
+local function owner_context(owner, base)
+	base = base or active
+	return {
+		view = owner.view,
+		instance = owner.instance or (base and base.instance),
+		owner = owner,
+		disposables = owner.cleanups,
+		drawing = base and base.drawing,
+		rendering = base and base.rendering,
+	}
+end
+
+---@param view View
+---@param kind string
+---@param parent ViewOwner?
+---@param instance ViewInstance?
+---@param node ViewRenderNode?
+---@return ViewOwner
+local function new_owner(view, kind, parent, instance, node)
+	return {
+		kind = kind,
+		view = view,
+		parent = parent,
+		instance = instance,
+		node = node,
+		cleanups = {},
+	}
+end
+
+---@param cleanup any
+local function run_cleanup(cleanup)
+	if type(cleanup) == "function" then
+		cleanup()
+		return
+	end
+	if cleanup and cleanup.stop then
+		cleanup:stop()
+	end
+end
+
+---@param owner ViewOwner?
+local function stop_owner(owner)
+	if not owner or owner.stopped then
+		return
+	end
+	owner.stopped = true
+	for i = #owner.cleanups, 1, -1 do
+		local cleanup = owner.cleanups[i]
+		owner.cleanups[i] = nil
+		run_cleanup(cleanup)
+	end
+end
+
+---@param owner ViewOwner
+---@param cleanup any
+local function add_owner_cleanup(owner, cleanup)
+	if owner.stopped then
+		run_cleanup(cleanup)
+		return
+	end
+	owner.cleanups[#owner.cleanups + 1] = cleanup
+end
+
+---@generic T
+---@param owner ViewOwner
+---@param fn fun(): T
+---@return T
+local function run_with_owner(owner, fn)
+	local prev = active
+	active = owner_context(owner, prev)
+	local ok, result = pcall(fn)
+	active = prev
+	if not ok then
+		error(result, 0)
+	end
+	return result
+end
+
+---@param owner ViewOwner
+---@param fn fun()
+---@return ViewEffect
+local function owner_effect(owner, fn)
+	local effect = owner.view.scope:effect(function()
+		return run_with_owner(owner, fn)
+	end)
+	add_owner_cleanup(owner, effect)
+	return effect
+end
+
+---@param owner ViewOwner
+---@param fn fun()
+---@return ViewEffect
+local function owner_lazy_effect(owner, fn)
+	local effect = owner.view.scope:lazy_effect(function()
+		return run_with_owner(owner, fn)
+	end)
+	add_owner_cleanup(owner, effect)
+	return effect
+end
+
+---@param scope ViewScope
+local function assert_reactive_read_allowed(scope)
+	local context = active
+	if context and context.rendering and not scope.active then
+		error("signal read during component build; pass reactive values to bindings or wrap derived values in miru.memo",
+			3)
+	end
+end
 
 ---@param view View
 ---@param instance ViewInstance
@@ -278,6 +412,21 @@ end
 local function bump_version(version)
 	-- Version bumps must not subscribe the currently running render effect.
 	version(rawget(version, "value") + 1)
+end
+
+---@param value any
+---@return boolean
+local function is_reactive(value)
+	return type(value) == "table" and rawget(value, "scope") ~= nil
+end
+
+---@param value any
+---@return any
+local function read_value(value)
+	if is_reactive(value) then
+		return value()
+	end
+	return value
 end
 
 ---@param value number?
@@ -427,6 +576,7 @@ local Scope = {}; do
 		---@return T
 		local function read(self)
 			local scope = rawget(self, "scope")
+			assert_reactive_read_allowed(scope)
 			scope:track(self, "value")
 			return rawget(self, "value")
 		end
@@ -726,6 +876,10 @@ local Animation = {}; do
 	function Animation:stop()
 		self.stopped = true
 		self.active = nil
+		if self.owner_scope then
+			stop_owner(self.owner_scope)
+			self.owner_scope = nil
+		end
 		if self.effect then
 			self.effect:stop()
 			self.effect = nil
@@ -751,7 +905,7 @@ local View = {}; do
 		---@param batch ViewBatch
 		function Instance:draw(batch)
 			if not self.commands then
-				return
+				self.commands = compile_render_tree(self)
 			end
 			for i = 1, #self.commands do
 				local item = self.commands[i]
@@ -787,6 +941,7 @@ local View = {}; do
 			end
 			unregister_dismissable(self)
 			self.mounted = nil
+			stop_owner(self.owner_scope)
 			if self.ref and self.ref.current == self then
 				self.ref.current = nil
 			end
@@ -841,6 +996,148 @@ local View = {}; do
 		holder.ref = ref
 		if ref then
 			ref.current = current
+		end
+	end
+
+	---@type fun(props: table?, direction: string?): table
+	local layout_style
+
+	---@param props table?
+	---@return boolean
+	local function has_reactive_props(props)
+		for _, value in pairs(props or {}) do
+			if is_reactive(value) then
+				return true
+			end
+		end
+		return false
+	end
+
+	---@param node ViewRenderNode
+	local function mark_node_commands_dirty(node)
+		local owner = node.owner or node.instance
+		if not owner or not owner.mounted then
+			return
+		end
+		root_instance(owner).commands = nil
+	end
+
+	---@param node ViewRenderNode
+	---@return table
+	local function resolve_props(node)
+		local raw = node.raw_props
+		local resolved = {}
+		for key, value in pairs(raw or {}) do
+			resolved[key] = read_value(value)
+		end
+		return resolved
+	end
+
+	---@param node ViewRenderNode
+	---@param resolved table
+	---@return boolean
+	local function props_changed(node, resolved)
+		local current = node.props
+		if not current then
+			return true
+		end
+		for key, value in pairs(resolved) do
+			if current[key] ~= value then
+				return true
+			end
+		end
+		for key in pairs(current) do
+			if resolved[key] == nil then
+				return true
+			end
+		end
+		return false
+	end
+
+	---@param node ViewRenderNode
+	local function apply_resolved_props(node)
+		local resolved = resolve_props(node)
+		if not props_changed(node, resolved) then
+			return
+		end
+		node.props = resolved
+		bind_ref(node, resolved.ref, node)
+		yoga.node_set(node.node, layout_style(resolved, node.direction))
+		mark_node_commands_dirty(node)
+	end
+
+	---@param node ViewRenderNode
+	local function stop_node_bindings(node)
+		stop_owner(node.canvas_owner)
+		node.canvas_owner = nil
+		stop_owner(node.owner_scope)
+		if node.prop_effect then
+			node.prop_effect:stop()
+			node.prop_effect = nil
+		end
+		if node.text_effect then
+			node.text_effect:stop()
+			node.text_effect = nil
+		end
+	end
+
+	---@param view View
+	---@param node ViewRenderNode
+	---@param props table?
+	---@param direction string?
+	local function bind_node_props(view, node, props, direction)
+		node.raw_props = props
+		node.direction = direction
+		if has_reactive_props(props) then
+			if not node.prop_effect then
+				node.prop_effect = owner_effect(assert(node.owner_scope), function()
+					view.stats.binding_count = view.stats.binding_count + 1
+					apply_resolved_props(node)
+				end)
+			else
+				apply_resolved_props(node)
+			end
+			return
+		end
+		if node.prop_effect then
+			node.prop_effect:stop()
+			node.prop_effect = nil
+		end
+		apply_resolved_props(node)
+	end
+
+	---@param view View
+	---@param node ViewRenderNode
+	---@param source any
+	local function bind_node_text(view, node, source)
+		node.text_source = source
+		if is_reactive(source) then
+			if not node.text_effect then
+				node.text_effect = owner_effect(assert(node.owner_scope), function()
+					view.stats.binding_count = view.stats.binding_count + 1
+					local text = read_value(node.text_source)
+					if node.text == text then
+						return
+					end
+					node.text = text
+					mark_node_commands_dirty(node)
+				end)
+			else
+				local text = read_value(source)
+				if node.text ~= text then
+					node.text = text
+					mark_node_commands_dirty(node)
+				end
+			end
+			return
+		end
+		if node.text_effect then
+			node.text_effect:stop()
+			node.text_effect = nil
+		end
+		if node.text ~= source then
+			node.text = source
+			mark_node_commands_dirty(node)
 		end
 	end
 
@@ -1108,7 +1405,6 @@ local View = {}; do
 		"alignSelf",
 		"margin",
 		"padding",
-		"border",
 		"gap",
 		"wrap",
 		"display",
@@ -1123,7 +1419,7 @@ local View = {}; do
 	---@param props table?
 	---@param direction string?
 	---@return table
-	local function layout_style(props, direction)
+	layout_style = function(props, direction)
 		props = props or {}
 		local style = {}
 		if direction then
@@ -1141,6 +1437,7 @@ local View = {}; do
 
 	---@param node ViewRenderNode
 	function dispose_render_instances(node)
+		stop_node_bindings(node)
 		bind_ref(node, nil, node)
 		if node.transition then
 			node.transition.animation:stop()
@@ -1260,7 +1557,7 @@ local View = {}; do
 	---@param state ViewTransitionState
 	---@return ViewTransitionRenderState
 	local function transition_render_state(state)
-		local progress = state.animation.value()
+		local progress = rawget(state.animation.value, "value")
 		local phase
 		if state.show then
 			phase = progress >= 1 and "entered" or "enter"
@@ -1279,6 +1576,27 @@ local View = {}; do
 
 	-- Render nodes patch the Yoga tree by sibling order plus optional key.
 	-- Component nodes keep their setup instance and only patch props on rerender.
+	---@param kind string
+	---@return string
+	local function node_owner_kind(kind)
+		if kind == "canvas" then
+			return "canvas"
+		end
+		if kind == "transition" then
+			return "control-flow"
+		end
+		return "host"
+	end
+
+	---@param ctx ViewRenderContext
+	---@return ViewOwner?
+	local function current_render_owner(ctx)
+		if active and active.owner then
+			return active.owner
+		end
+		return ctx.instance.owner_scope
+	end
+
 	---@param ctx ViewRenderContext
 	---@param kind string
 	---@param key any
@@ -1305,11 +1623,10 @@ local View = {}; do
 				children = {},
 				cursor = 1,
 			}
+			node.owner_scope = new_owner(ctx.view, node_owner_kind(kind), current_render_owner(ctx), ctx.instance, node)
 			parent.children[index] = node
 		end
-		node.props = props
-		bind_ref(node, props and props.ref, node)
-		yoga.node_set(node.node, layout_style(props, direction))
+		bind_node_props(ctx.view, node, props, direction)
 		return node
 	end
 
@@ -1360,7 +1677,13 @@ local View = {}; do
 		node.commands = commands
 		local prev = active_batch
 		active_batch = commands
-		local ok, err = pcall(draw, width, height)
+		stop_owner(node.canvas_owner)
+		node.canvas_owner = new_owner(assert(node.owner_scope).view, "canvas", node.owner_scope, node.owner, node)
+		local ok, err = pcall(function()
+			return run_with_owner(assert(node.canvas_owner), function()
+				return draw(width, height)
+			end)
+		end)
 		active_batch = prev
 		if not ok then
 			error(err, 0)
@@ -1434,22 +1757,34 @@ local View = {}; do
 	---@param instance ViewInstance
 	---@return ViewCommand[]
 	function compile_render_tree(instance)
-		local root = assert(instance.render_node)
-		if not root.parent then
-			local style = layout_style(root.props)
-			if style.width == nil then
-				style.width = instance.view.w
+		local prev = active
+		active = {
+			view = instance.view,
+		}
+		local ok, result = pcall(function()
+			instance.view.stats.command_compile_count = instance.view.stats.command_compile_count + 1
+			local root = assert(instance.render_node)
+			if not root.parent then
+				local style = layout_style(root.props)
+				if style.width == nil then
+					style.width = instance.view.w
+				end
+				if style.height == nil then
+					style.height = instance.view.h
+				end
+				yoga.node_set(root.node, style)
 			end
-			if style.height == nil then
-				style.height = instance.view.h
-			end
-			yoga.node_set(root.node, style)
-		end
-		yoga.node_calc(root.node)
+			yoga.node_calc(root.node)
 
-		local out = {}
-		compile_render_node(root, out, 0, 0)
-		return out
+			local out = {}
+			compile_render_node(root, out, 0, 0)
+			return out
+		end)
+		active = prev
+		if not ok then
+			error(result, 0)
+		end
+		return result
 	end
 
 	---@param props table?
@@ -1543,6 +1878,8 @@ local View = {}; do
 			render_node = render_node,
 			build_count = 0,
 		}, Instance)
+		instance.owner_scope = new_owner(view, parent and "component" or "root",
+			render_node.owner_scope or (parent and parent.owner_scope), instance, render_node)
 		render_node.instance = instance
 		local args = component_args(instance)
 		instance.args = args
@@ -1555,6 +1892,7 @@ local View = {}; do
 			view = view,
 			instance = instance,
 			disposables = instance.disposables,
+			owner = instance.owner_scope,
 		}
 		local result = table.pack(pcall(chunk, args))
 		---@cast result table<integer, any>
@@ -1575,6 +1913,7 @@ local View = {}; do
 			instance = instance,
 			drawing = true,
 			rendering = true,
+			owner = instance.owner_scope,
 		}
 		active_render = {
 			view = view,
@@ -1655,7 +1994,7 @@ local View = {}; do
 		local ctx = assert(active_render)
 		assert(ctx.view == self)
 		local node = render_element(ctx, "text", props and props.key, props)
-		node.text = text
+		bind_node_text(self, node, text)
 		remove_render_children_from(node, 1)
 		return node
 	end
@@ -1687,6 +2026,7 @@ local View = {}; do
 				children = {},
 				cursor = 1,
 			}
+			node.owner_scope = new_owner(self, "host", current_render_owner(ctx), ctx.instance, node)
 			parent.children[index] = node
 			mount_component(self, chunk, props, ctx.instance, node)
 		else
@@ -1695,7 +2035,7 @@ local View = {}; do
 		local instance = assert(node.instance)
 		instance.render_node = node
 		bind_ref(instance, props and props.ref, instance)
-		yoga.node_set(node.node, layout_style(props))
+		bind_node_props(self, node, props)
 		return instance
 	end
 
@@ -1726,6 +2066,7 @@ local View = {}; do
 				cursor = 1,
 				transition = create_transition(self, props),
 			}
+			node.owner_scope = new_owner(self, "control-flow", current_render_owner(ctx), ctx.instance, node)
 			parent.children[index] = node
 		else
 			update_transition(assert(node.transition), props)
@@ -1740,7 +2081,9 @@ local View = {}; do
 			local prev = ctx.parent
 			ctx.parent = node
 			node.cursor = 1
-			children(state)
+			run_with_owner(assert(node.owner_scope), function()
+				children(state)
+			end)
 			remove_render_children_from(node, node.cursor)
 			ctx.parent = prev
 		else
@@ -1908,6 +2251,8 @@ function M.new(args)
 		effect_order = 0,
 		stats = {
 			render_count = 0,
+			binding_count = 0,
+			command_compile_count = 0,
 		},
 		resources = {
 			font = {
@@ -1917,12 +2262,6 @@ function M.new(args)
 			component_path = args.component_path or COMPONENT_PATH,
 		},
 	}, View)
-end
-
----@param value any
----@return boolean
-local function is_reactive(value)
-	return type(value) == "table" and rawget(value, "scope") ~= nil
 end
 
 ---@class (partial) ViewComputedState<T>
@@ -1966,6 +2305,9 @@ end
 ---@param fn fun()
 ---@return ViewEffect
 function M.effect(fn)
+	if active and active.owner then
+		return owner_effect(active.owner, fn)
+	end
 	local scope = active and active.view.scope or reactive_scope
 	return scope:effect(fn)
 end
@@ -1974,22 +2316,34 @@ end
 ---@param fn fun(): T
 ---@return ViewComputed<T>
 function M.memo(fn)
-	local scope = active and active.view.scope or reactive_scope
+	local owner = active and active.owner
+	local scope = owner and owner.view.scope or active and active.view.scope or reactive_scope
 	---@type ViewComputedState<T>
 	local memo = setmetatable({
 		scope = scope,
 		dirty = true,
 	}, Computed)
-	memo.effect = scope:lazy_effect(function()
+	local function invalidate()
 		if memo.dirty then
 			return
 		end
 		memo.dirty = true
 		scope:trigger(memo, "value")
-	end)
+	end
+	if owner then
+		memo.effect = owner_lazy_effect(owner, invalidate)
+	else
+		memo.effect = scope:lazy_effect(invalidate)
+	end
 	function memo:read()
+		assert_reactive_read_allowed(scope)
 		if self.dirty then
-			self.value = scope:compute(assert(self.effect), fn)
+			self.value = scope:compute(assert(self.effect), function()
+				if owner then
+					return run_with_owner(owner, fn)
+				end
+				return fn()
+			end)
 			self.dirty = false
 		end
 		scope:track(self, "value")
@@ -2019,10 +2373,7 @@ end
 ---@param value T|ViewValue<T>|ViewComputed<T>
 ---@return T
 function M.get(value)
-	if is_reactive(value) then
-		return value()
-	end
-	return value
+	return read_value(value)
 end
 
 ---@param name string
@@ -2036,7 +2387,7 @@ end
 ---@return ViewAnimation
 function M.animated(fn, opts)
 	---@cast active ViewContext
-	assert(active.disposables)
+	local parent_owner = assert(active.owner, "animated can only be used inside an owner")
 	local view = active.view
 	opts = opts or {}
 	---@type ViewAnimation
@@ -2049,19 +2400,11 @@ function M.animated(fn, opts)
 		duration = opts.duration or 0.14,
 		easing = easing(opts),
 	}, Animation)
+	local owner = new_owner(view, "animation", parent_owner, active.instance, nil)
+	animation.owner_scope = owner
 	local first = true
-	---@type ViewContext
-	local ctx = {
-		view = view,
-	}
-	animation.effect = view.scope:effect(function()
-		local prev = active
-		active = ctx
-		local ok, target = pcall(fn)
-		active = prev
-		if not ok then
-			error(target, 0)
-		end
+	animation.effect = owner_effect(owner, function()
+		local target = fn()
 		assert(type(target) == "number", "animated target must be a number")
 		if first then
 			first = false
@@ -2075,8 +2418,14 @@ function M.animated(fn, opts)
 		end
 		animation:retarget(target)
 	end)
-	active.disposables[#active.disposables + 1] = animation
+	add_owner_cleanup(parent_owner, animation)
 	return animation
+end
+
+---@param fn fun()
+function M.cleanup(fn)
+	---@cast active ViewContext
+	add_owner_cleanup(assert(active.owner, "cleanup can only be used inside an owner"), fn)
 end
 
 ---@param props ViewClickable?
@@ -2243,22 +2592,12 @@ M.batch = batch
 ---@return ViewComputed<T>
 function M.computed(fn)
 	---@cast active ViewContext
-	assert(active.disposables)
+	local owner = assert(active.owner, "computed can only be used inside an owner")
 	local view = active.view
 	---@type ViewValue<T>
 	local value = view.scope:value(nil)
-	---@type ViewContext
-	local ctx = {
-		view = view,
-	}
-	local effect = view.scope:effect(function()
-		local prev = active
-		active = ctx
-		local ok, result = pcall(fn)
-		active = prev
-		if not ok then
-			error(result, 0)
-		end
+	local effect = owner_effect(owner, function()
+		local result = fn()
 		value(result)
 	end)
 	---@type ViewComputedState<T>
@@ -2266,7 +2605,6 @@ function M.computed(fn)
 		effect = effect,
 		value = value,
 	}, Computed)
-	active.disposables[#active.disposables + 1] = computed
 	---@cast computed ViewComputed<T>
 	return computed
 end

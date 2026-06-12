@@ -4,6 +4,12 @@ local surface = require "test.feature.showcase.surface"
 local args = ...
 
 local panel_open = miru.signal(true)
+local panel_label = miru.memo(function()
+	return panel_open() and "Hide Details" or "Show Details"
+end)
+local detail_text = miru.memo(function()
+	return panel_open() and "Hover and click controls to exercise local state." or ""
+end)
 
 return function()
 	local width = args.width or 1200
@@ -55,7 +61,7 @@ return function()
 							align = "LC",
 						})
 						miru.mount("test/feature/showcase/button", {
-							label = panel_open() and "Hide Details" or "Show Details",
+							label = panel_label,
 							background = 0xffeff6ff,
 							hover_background = 0xffdbeafe,
 							pressed_background = 0xffbfdbfe,
@@ -99,15 +105,13 @@ return function()
 							color = 0xff6b7280,
 							align = "LC",
 						})
-						if panel_open() then
-							miru.text("Hover and click controls to exercise local state.", {
-								width = "100%",
-								height = 28,
-								size = 14,
-								color = 0xff374151,
-								align = "LC",
-							})
-						end
+						miru.text(detail_text, {
+							width = "100%",
+							height = 28,
+							size = 14,
+							color = 0xff374151,
+							align = "LC",
+						})
 					end)
 				end)
 			end)

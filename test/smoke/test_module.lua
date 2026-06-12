@@ -6,6 +6,7 @@ function M.run()
 	assert(type(miru.new) == "function")
 	assert(type(miru.value) == "function")
 	assert(type(miru.computed) == "function")
+	assert(type(miru.cleanup) == "function")
 	assert(type(miru.box) == "function")
 	assert(type(miru.text) == "function")
 end

@@ -38,10 +38,10 @@ return function(props, children)
 			miru.batch:add(rounded_rect.rect {
 				width = pixel(width),
 				height = pixel(height),
-				radius = pixel(props.radius or 0),
-				fill = props.fill or props.background or 0xffffffff,
-				border = props.border or props.fill or props.background or 0xffffffff,
-				border_width = pixel(props.border_width or 0),
+				radius = pixel(miru.get(props.radius) or 0),
+				fill = miru.get(props.fill) or miru.get(props.background) or 0xffffffff,
+				border = miru.get(props.border) or miru.get(props.fill) or miru.get(props.background) or 0xffffffff,
+				border_width = pixel(miru.get(props.border_width) or 0),
 			}, 0, 0)
 		end)
 		if children then
