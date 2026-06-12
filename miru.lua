@@ -1456,6 +1456,69 @@ local View = {}; do
 		end
 	end
 
+	---@param node ViewRenderNode
+	---@param parent_node lightuserdata
+	local function rebuild_yoga_node(node, parent_node)
+		node.node = yoga.node_new(parent_node)
+		yoga.node_set(node.node, layout_style(node.props, node.direction))
+		for i = 1, #node.children do
+			rebuild_yoga_node(node.children[i], node.node)
+		end
+	end
+
+	---@param parent ViewRenderNode
+	local function rebuild_yoga_children(parent)
+		for i = 1, #parent.children do
+			local child = parent.children[i]
+			yoga.node_remove(parent.node, child.node)
+			yoga.node_free(child.node)
+		end
+		for i = 1, #parent.children do
+			rebuild_yoga_node(parent.children[i], parent.node)
+		end
+		mark_node_commands_dirty(parent)
+	end
+
+	---@param parent ViewRenderNode
+	---@param index integer
+	---@param node ViewRenderNode
+	local function insert_render_child(parent, index, node)
+		node.parent = parent
+		if index == #parent.children + 1 then
+			parent.children[index] = node
+			mark_node_commands_dirty(parent)
+			return
+		end
+		table.insert(parent.children, index, node)
+		rebuild_yoga_children(parent)
+	end
+
+	---@param parent ViewRenderNode
+	---@param from_index integer
+	---@param to_index integer
+	local function move_render_child(parent, from_index, to_index)
+		if from_index == to_index then
+			return
+		end
+		local node = table.remove(parent.children, from_index)
+		assert(node, "missing render child")
+		table.insert(parent.children, to_index, node)
+		rebuild_yoga_children(parent)
+	end
+
+	---@param parent ViewRenderNode
+	---@param start_index integer
+	---@param match fun(node: ViewRenderNode): boolean
+	---@return integer?
+	local function find_render_child(parent, start_index, match)
+		for i = start_index, #parent.children do
+			if match(parent.children[i]) then
+				return i
+			end
+		end
+		return nil
+	end
+
 	---@param parent ViewRenderNode
 	---@param index integer
 	local function remove_render_child(parent, index)
@@ -1467,6 +1530,7 @@ local View = {}; do
 		yoga.node_remove(parent.node, node.node)
 		yoga.node_free(node.node)
 		table.remove(parent.children, index)
+		mark_node_commands_dirty(parent)
 	end
 
 	---@param parent ViewRenderNode
@@ -1608,10 +1672,20 @@ local View = {}; do
 		local index = parent.cursor
 		parent.cursor = index + 1
 
+		local function match(node)
+			return node.kind == kind and node.key == key
+		end
+
 		local node = parent.children[index]
-		if node and (node.kind ~= kind or node.key ~= key) then
-			remove_render_children_from(parent, index)
-			node = nil
+		if node and not match(node) then
+			local move_index = find_render_child(parent, index + 1, match)
+			if move_index then
+				move_render_child(parent, move_index, index)
+				node = parent.children[index]
+			else
+				remove_render_children_from(parent, index)
+				node = nil
+			end
 		end
 		if not node then
 			node = {
@@ -1624,7 +1698,7 @@ local View = {}; do
 				cursor = 1,
 			}
 			node.owner_scope = new_owner(ctx.view, node_owner_kind(kind), current_render_owner(ctx), ctx.instance, node)
-			parent.children[index] = node
+			insert_render_child(parent, index, node)
 		end
 		bind_node_props(ctx.view, node, props, direction)
 		return node
@@ -2010,10 +2084,20 @@ local View = {}; do
 		local index = parent.cursor
 		parent.cursor = index + 1
 
+		local function match(node)
+			return node.kind == "component" and node.key == key and node.chunk == chunk
+		end
+
 		local node = parent.children[index]
-		if node and (node.kind ~= "component" or node.key ~= key or node.chunk ~= chunk) then
-			remove_render_children_from(parent, index)
-			node = nil
+		if node and not match(node) then
+			local move_index = find_render_child(parent, index + 1, match)
+			if move_index then
+				move_render_child(parent, move_index, index)
+				node = parent.children[index]
+			else
+				remove_render_children_from(parent, index)
+				node = nil
+			end
 		end
 		if not node then
 			node = {
@@ -2027,7 +2111,7 @@ local View = {}; do
 				cursor = 1,
 			}
 			node.owner_scope = new_owner(self, "host", current_render_owner(ctx), ctx.instance, node)
-			parent.children[index] = node
+			insert_render_child(parent, index, node)
 			mount_component(self, chunk, props, ctx.instance, node)
 		else
 			patch_props(assert(node.instance), props)
@@ -2050,10 +2134,20 @@ local View = {}; do
 		parent.cursor = index + 1
 
 		local key = props.key
+		local function match(node)
+			return node.kind == "transition" and node.key == key
+		end
+
 		local node = parent.children[index]
-		if node and (node.kind ~= "transition" or node.key ~= key) then
-			remove_render_children_from(parent, index)
-			node = nil
+		if node and not match(node) then
+			local move_index = find_render_child(parent, index + 1, match)
+			if move_index then
+				move_render_child(parent, move_index, index)
+				node = parent.children[index]
+			else
+				remove_render_children_from(parent, index)
+				node = nil
+			end
 		end
 		if not node then
 			node = {
@@ -2067,7 +2161,7 @@ local View = {}; do
 				transition = create_transition(self, props),
 			}
 			node.owner_scope = new_owner(self, "control-flow", current_render_owner(ctx), ctx.instance, node)
-			parent.children[index] = node
+			insert_render_child(parent, index, node)
 		else
 			update_transition(assert(node.transition), props)
 		end

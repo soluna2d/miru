@@ -31,13 +31,13 @@
 
 ## 3. Retained Tree
 
-- [ ] Define retained node records for root, component wrapper, host node, text node, canvas node and range anchor.
-- [ ] Keep a single Yoga tree per root.
-- [ ] Remove per-component Yoga root calculation from the new runtime path.
-- [ ] Add node insertion, removal and move helpers that update both retained tree and Yoga tree.
-- [ ] Add tests for intrinsic child size affecting parent layout.
-- [ ] Add tests for child `width = "100%"` / `height = "100%"` using parent layout.
-- [ ] Add tests for destroy detaching Yoga nodes.
+- [x] Define retained node records for root, component wrapper, host node, text node, canvas node and range anchor.
+- [x] Keep a single Yoga tree per root.
+- [x] Remove per-component Yoga root calculation from the new runtime path.
+- [x] Add node insertion, removal and move helpers that update both retained tree and Yoga tree.
+- [x] Add tests for intrinsic child size affecting parent layout.
+- [x] Add tests for child `width = "100%"` / `height = "100%"` using parent layout.
+- [x] Add tests for destroy detaching Yoga nodes.
 
 ## 4. Host Prop Binding
 
