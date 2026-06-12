@@ -2,24 +2,24 @@
 
 ## 0. Repository Baseline
 
-- [ ] Keep imported `miru.lua` history as the starting point.
+- [x] Keep imported `miru.lua` history as the starting point.
 - [ ] Add a minimal module README that states Miru is signal-native and has no old `core.view` compatibility guarantee.
-- [ ] Add a minimal test entry for running Miru runtime tests outside Soluna Playground.
+- [x] Add a minimal test entry for running Miru runtime tests outside Soluna Playground.
 - [ ] Decide whether examples live in `examples/` or `test/fixture/`.
 
 ## 1. Reactive Kernel
 
-- [ ] Replace the current eager render-scope tracker with an owner-based reactive graph.
-- [ ] Implement `signal(initial)`.
-- [ ] Implement lazy `memo(fn)` with dependency cleanup.
-- [ ] Implement `effect(fn)` with cleanup registration.
-- [ ] Implement `batch(fn)` with deterministic flush.
-- [ ] Implement `untrack(fn)`.
-- [ ] Implement `get(value)` for static-or-reactive values.
-- [ ] Add tests for chained memo invalidation.
-- [ ] Add tests for branch dependency cleanup.
-- [ ] Add tests for effect disposal.
-- [ ] Add tests for batched writes running effects once.
+- [x] Replace the current eager render-scope tracker with an owner-based reactive graph.
+- [x] Implement `signal(initial)`.
+- [x] Implement lazy `memo(fn)` with dependency cleanup.
+- [x] Implement `effect(fn)` with cleanup registration.
+- [x] Implement `batch(fn)` with deterministic flush.
+- [x] Implement `untrack(fn)`.
+- [x] Implement `get(value)` for static-or-reactive values.
+- [x] Add tests for chained memo invalidation.
+- [x] Add tests for branch dependency cleanup.
+- [x] Add tests for effect disposal.
+- [x] Add tests for batched writes running effects once.
 
 ## 2. Runtime Ownership
 
@@ -27,7 +27,7 @@
 - [ ] Ensure every owner can register cleanup callbacks.
 - [ ] Stop all owned effects when a node/range/component is destroyed.
 - [ ] Add diagnostics for reading signals directly in component build scope.
-- [ ] Add tests proving component build does not rerun on signal writes.
+- [ ] Add tests for component-owned signals driving explicit binding and dirty owners.
 
 ## 3. Retained Tree
 
@@ -113,9 +113,11 @@
 - [ ] Verify frame/cursor signal updates do not rebuild owner component.
 - [ ] Verify large batched updates produce one Yoga calculation and one command compile per dirty root.
 
-## 11. Showcase Metrics Feature Test
+## 11. Showcase Feature Test
 
-- [ ] Add `test/feature/test_showcase_metrics.lua`.
+- [x] Add `test/feature/test_showcase.lua`.
+- [x] Keep showcase implementation files under `test/feature/showcase/`.
+- [x] Add rounded rect test material under `test/material`.
 - [ ] Build the showcase from real component shapes rather than synthetic demo-only widgets.
 - [ ] Adapt component showcase/test_components style cases where they still represent Miru behavior.
 - [ ] Adapt real-world component shapes such as button, switch, dropdown, text field and preference panels.

@@ -126,6 +126,7 @@ local compile_render_tree
 ---@field commands ViewCommand[]?
 ---@field render_node ViewRenderNode?
 ---@field layout_version ViewValue<integer>
+---@field build_count integer
 ---@field props table
 ---@field args table
 ---@field clickable ViewClickable?
@@ -216,6 +217,11 @@ local compile_render_tree
 ---@field pressed fun(): ViewValue<boolean>
 ---@field ref fun(): ViewRef
 ---@field computed fun(fn: function): ViewComputed<any>
+---@field signal fun(value: any): ViewValue<any>
+---@field memo fun(fn: function): ViewComputed<any>
+---@field effect fun(fn: function): ViewEffect
+---@field untrack fun(fn: function): any
+---@field get fun(value: any): any
 ---@field animated fun(fn: ViewAnimatedTarget, opts?: table): ViewAnimation
 ---@field transition fun(props: table, children: fun(state: ViewTransitionRenderState))
 ---@field lerp fun(a: number, b: number, t: number): number
@@ -517,6 +523,9 @@ local Scope = {}; do
 		for effect in pairs(dep) do
 			self:schedule(effect)
 		end
+		if self.auto_flush and self.batch_depth == 0 and not self.flushing then
+			self:flush()
+		end
 	end
 
 	---@param effect ViewEffect
@@ -559,7 +568,21 @@ local Scope = {}; do
 		return effect
 	end
 
+	---@param fn fun()
+	---@param order integer?
+	---@return ViewEffect
+	function Scope:lazy_effect(fn, order)
+		---@type ViewEffect
+		return setmetatable({
+			scope = self,
+			fn = fn,
+			deps = {},
+			order = order or 0,
+		}, Effect)
+	end
+
 	function Scope:flush()
+		self.flushing = true
 		while self.queue_head <= self.queue_tail do
 			---@type ViewEffect[]
 			local batch = {}
@@ -594,8 +617,58 @@ local Scope = {}; do
 		end
 		self.queue_head = 1
 		self.queue_tail = 0
+		self.flushing = nil
+	end
+
+	---@generic T
+	---@param fn fun(): T
+	---@return T
+	function Scope:batch(fn)
+		self.batch_depth = (self.batch_depth or 0) + 1
+		local ok, result = pcall(fn)
+		self.batch_depth = self.batch_depth - 1
+		if not ok then
+			error(result, 0)
+		end
+		if self.auto_flush and self.batch_depth == 0 then
+			self:flush()
+		end
+		return result
+	end
+
+	---@generic T
+	---@param effect ViewEffect
+	---@param fn fun(): T
+	---@return T
+	function Scope:compute(effect, fn)
+		cleanup(effect)
+		local prev = self.active
+		self.active = effect
+		local ok, result = pcall(fn)
+		self.active = prev
+		if not ok then
+			error(result, 0)
+		end
+		return result
 	end
 end
+
+---@param auto_flush boolean?
+---@return ViewScope
+local function new_scope(auto_flush)
+	return setmetatable({
+		targets = setmetatable({}, {
+			__mode = "k",
+		}),
+		queue = {},
+		queue_head = 1,
+		queue_tail = 0,
+		batch_depth = 0,
+		auto_flush = auto_flush,
+	}, Scope)
+end
+
+local reactive_scope = new_scope(true)
 
 ---@class (partial) ViewAnimation
 local Animation = {}; do
@@ -1457,9 +1530,6 @@ local View = {}; do
 		chunk = assert(load(source, "@" .. path, "t"))
 		assert(type(chunk) == "function")
 
-		local order = view.effect_order + 1
-		view.effect_order = order
-
 		---@type ViewInstance
 		local instance = setmetatable({
 			view = view,
@@ -1471,6 +1541,7 @@ local View = {}; do
 			layout_version = view.scope:value(0),
 			props = {},
 			render_node = render_node,
+			build_count = 0,
 		}, Instance)
 		render_node.instance = instance
 		local args = component_args(instance)
@@ -1493,51 +1564,41 @@ local View = {}; do
 		end
 		local draw = result[2]
 		assert(type(draw) == "function")
-		local ctx
 
-		instance.effect = view.scope:effect(function()
-			if not instance.mounted then
-				return
+		local nested_render = active_render ~= nil
+		prev = active
+		local prev_render = active_render
+		local prev_effect = view.scope.active
+		---@type ViewContext
+		active = {
+			view = view,
+			instance = instance,
+			drawing = true,
+			rendering = true,
+		}
+		active_render = {
+			view = view,
+			instance = instance,
+			parent = assert(instance.render_node),
+		}
+		view.scope.active = nil
+		local ok, err = pcall(function()
+			instance.build_count = instance.build_count + 1
+			view.stats.render_count = view.stats.render_count + 1
+			active_render.parent.cursor = 1
+			draw()
+			remove_render_children_from(active_render.parent, active_render.parent.cursor)
+			if not nested_render then
+				local root = root_instance(instance)
+				root.commands = compile_render_tree(root)
 			end
-			local nested_render = active_render ~= nil
-			if not instance.parent then
-				view.layout_version()
-			end
-			instance.layout_version()
-			---@diagnostic disable-next-line: redefined-local
-			local prev = active
-			local prev_render = active_render
-			---@type ViewContext
-			ctx = ctx or {
-				view = view,
-				instance = instance,
-				drawing = true,
-				rendering = true,
-			}
-			local parent_node = assert(instance.render_node)
-			local render_ctx = {
-				view = view,
-				instance = instance,
-				parent = parent_node,
-			}
-			active = ctx
-			active_render = render_ctx
-			local ok, err = pcall(function()
-				view.stats.render_count = view.stats.render_count + 1
-				render_ctx.parent.cursor = 1
-				draw()
-				remove_render_children_from(render_ctx.parent, render_ctx.parent.cursor)
-				if not nested_render then
-					local root = root_instance(instance)
-					root.commands = compile_render_tree(root)
-				end
-			end)
-			active = prev
-			active_render = prev_render
-			if not ok then
-				error(err, 0)
-			end
-		end, order)
+		end)
+		view.scope.active = prev_effect
+		active = prev
+		active_render = prev_render
+		if not ok then
+			error(err, 0)
+		end
 
 		return instance
 	end
@@ -1834,14 +1895,7 @@ local M = {}
 function M.new(args)
 	args = args or {}
 	---@type ViewScope
-	local scope = setmetatable({
-		targets = setmetatable({}, {
-			__mode = "k",
-		}),
-		queue = {},
-		queue_head = 1,
-		queue_tail = 0,
-	}, Scope)
+	local scope = new_scope()
 	---@type View
 	return setmetatable({
 		scope = scope,
@@ -1865,6 +1919,12 @@ function M.new(args)
 	}, View)
 end
 
+---@param value any
+---@return boolean
+local function is_reactive(value)
+	return type(value) == "table" and rawget(value, "scope") ~= nil
+end
+
 ---@class (partial) ViewComputedState<T>
 local Computed = {}; do
 	Computed.__index = Computed
@@ -1872,6 +1932,9 @@ local Computed = {}; do
 	---@generic T
 	---@return T
 	function Computed:__call()
+		if self.read then
+			return self:read()
+		end
 		return self.value()
 	end
 
@@ -1890,6 +1953,76 @@ end
 function M.value(value)
 	---@cast active ViewContext
 	return active.view.scope:value(value)
+end
+
+---@generic T
+---@param value T
+---@return ViewValue<T>
+function M.signal(value)
+	local scope = active and active.view.scope or reactive_scope
+	return scope:value(value)
+end
+
+---@param fn fun()
+---@return ViewEffect
+function M.effect(fn)
+	local scope = active and active.view.scope or reactive_scope
+	return scope:effect(fn)
+end
+
+---@generic T
+---@param fn fun(): T
+---@return ViewComputed<T>
+function M.memo(fn)
+	local scope = active and active.view.scope or reactive_scope
+	---@type ViewComputedState<T>
+	local memo = setmetatable({
+		scope = scope,
+		dirty = true,
+	}, Computed)
+	memo.effect = scope:lazy_effect(function()
+		if memo.dirty then
+			return
+		end
+		memo.dirty = true
+		scope:trigger(memo, "value")
+	end)
+	function memo:read()
+		if self.dirty then
+			self.value = scope:compute(assert(self.effect), fn)
+			self.dirty = false
+		end
+		scope:track(self, "value")
+		return self.value
+	end
+
+	---@cast memo ViewComputed<T>
+	return memo
+end
+
+---@generic T
+---@param fn fun(): T
+---@return T
+function M.untrack(fn)
+	local scope = active and active.view.scope or reactive_scope
+	local prev = scope.active
+	scope.active = nil
+	local ok, result = pcall(fn)
+	scope.active = prev
+	if not ok then
+		error(result, 0)
+	end
+	return result
+end
+
+---@generic T
+---@param value T|ViewValue<T>|ViewComputed<T>
+---@return T
+function M.get(value)
+	if is_reactive(value) then
+		return value()
+	end
+	return value
 end
 
 ---@param name string
@@ -2080,6 +2213,15 @@ end
 
 local Batch = {}; do
 	local methods = {}
+
+	---@generic T
+	---@param _ ViewBatch
+	---@param fn fun(): T
+	---@return T
+	function Batch.__call(_, fn)
+		local scope = active and active.view.scope or reactive_scope
+		return scope:batch(fn)
+	end
 
 	---@param name string
 	function Batch.__index(_, name)

@@ -232,14 +232,14 @@ Test layers:
 
 The key metric is not total FPS. The key metric is whether an update touches only the graph nodes that semantically depend on the changed signal.
 
-### Showcase Metrics Feature Test
+### Showcase Feature Test
 
 最终需要一个可交互的 feature test，用来直观看到 signal-native runtime 的实际效果。这个测试不是人工拼出来的 demo 面板，而应该优先使用真实组件样本：现有 component showcase/test_components 形态，以及 Ishiku 中实际使用过的 button、switch、dropdown、text_field、preference 等组件形态。
 
 建议入口：
 
 ```text
-test/feature/test_showcase_metrics.lua
+test/feature/test_showcase.lua
 ```
 
 运行后应展示一组典型组件和一个 metrics 面板。metrics 至少包含：

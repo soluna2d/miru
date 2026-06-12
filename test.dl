@@ -4,6 +4,10 @@ height : 800
 high_dpi : true
 window_title : "Miru Tests"
 background : 0xfff3f4f6
+extlua_entry : miru_test_init
+extlua_preload : miru_test
+extlua_material : rounded_rect
+extlua_material_path : test/material/?.lua
 text_sampler :
   min_filter : linear
   mag_filter : linear
