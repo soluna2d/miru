@@ -1,0 +1,111 @@
+--
+name : compose
+image : icons/compose.png
+--
+name : close
+image : icons/close.png
+--
+name : more
+image : icons/more.png
+--
+name : preference
+image : icons/preference.png
+--
+name : provider
+image : icons/provider.png
+--
+name : provider_openai
+image : icons/provider_openai.png
+--
+name : provider_codex
+image : icons/provider_codex.png
+--
+name : account
+image : icons/account.png
+--
+name : send
+image : icons/send.png
+--
+name : stop
+image : icons/stop.png
+--
+name : chevron_down
+image : icons/chevron_down.png
+--
+name : eye
+image : icons/eye.png
+--
+name : eye_off
+image : icons/eye_off.png
+--
+name : external_link
+image : icons/external_link.png
+--
+name : password_mask
+image : icons/password_mask.png
+--
+name : wrench
+image : icons/wrench.png
+--
+name : brain
+image : icons/brain.png
+--
+name : database
+image : icons/database.png
+--
+name : zap
+image : icons/zap.png
+--
+name : circle
+image : icons/circle.png
+--
+name : circle_check
+image : icons/circle_check.png
+--
+name : circle_x
+image : icons/circle_x.png
+--
+name : circle_dot
+image : icons/circle_dot.png
+--
+name : clock
+image : icons/clock.png
+--
+name : refresh_cw
+image : icons/refresh_cw.png
+--
+name : chevron_left
+image : icons/chevron_left.png
+--
+name : chevron_right
+image : icons/chevron_right.png
+--
+name : pencil
+image : icons/pencil.png
+--
+name : git_fork
+image : icons/git_fork.png
+--
+name : markdown_heading_1
+image : icons/markdown_heading_1.png
+--
+name : markdown_heading_2
+image : icons/markdown_heading_2.png
+--
+name : markdown_heading_3
+image : icons/markdown_heading_3.png
+--
+name : markdown_heading_4
+image : icons/markdown_heading_4.png
+--
+name : markdown_heading_5
+image : icons/markdown_heading_5.png
+--
+name : markdown_heading_6
+image : icons/markdown_heading_6.png
+--
+name : markdown_task_unchecked
+image : icons/markdown_task_unchecked.png
+--
+name : markdown_task_checked
+image : icons/markdown_task_checked.png

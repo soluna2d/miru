@@ -2237,15 +2237,17 @@ function M.ref()
 	}, Ref)
 end
 
----@param methods table
-function M.expose(methods)
-	---@cast active MiruContext
-	local instance = assert(active.instance)
-	for key, value in pairs(methods) do
-		assert(instance[key] == nil)
-		instance[key] = value
+	---@param methods table
+	function M.expose(methods)
+		---@cast active MiruContext
+		local instance = assert(active.instance)
+		for key, value in pairs(methods) do
+			assert(instance[key] == nil)
+			instance[key] = function(_, ...args)
+				return value(table.unpack(args, 1, args.n))
+			end
+		end
 	end
-end
 
 ---@param chunk string
 ---@param props table?
