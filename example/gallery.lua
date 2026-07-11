@@ -1,3 +1,4 @@
+local copy = require "example.copy"
 local miru = require "miru"
 
 local args = ...
@@ -59,19 +60,20 @@ end
 
 local function title(name, detail, width)
 	local palette = miru.use "palette"
+	local detail_height = width < 280 and 54 or 38
 	miru.vbox({
 		width = width,
 		gap = 5,
 	}, function()
-		miru.text(name, {
+		miru.text(copy.group(name), {
 			width = width,
 			height = 30,
 			style = "title",
 			color = palette.text,
 		})
-		miru.text(detail, {
+		miru.text(copy.words(detail), {
 			width = width,
-			height = 38,
+			height = detail_height,
 			style = "muted",
 			color = palette.muted,
 		})
@@ -94,13 +96,13 @@ local function metric(label, value, width)
 			height = "100%",
 			fill = palette.surface_alt,
 		})
-		miru.text(label, {
+		miru.text(copy.group(label), {
 			width = width - 20,
 			height = 16,
 			style = "label",
 			color = palette.muted,
 		})
-		miru.text(value, {
+		miru.text(copy.group(value), {
 			width = width - 20,
 			height = 22,
 			size = 15,
@@ -135,13 +137,13 @@ local function desktop_sidebar(width, height, selected_name, select_component)
 			height = "100%",
 			fill = palette.dark,
 		})
-		miru.text("MIRU / LIVE", {
+		miru.text(copy.group "MIRU / LIVE", {
 			width = width - 32,
 			height = 28,
 			size = 18,
 			color = palette.white,
 		})
-		miru.text("Component index", {
+		miru.text(copy.group "Component index", {
 			width = width - 32,
 			height = 18,
 			style = "label",
@@ -174,7 +176,7 @@ local function mobile_navigation(width, selected_index, select_component)
 			flex = 1,
 			height = 42,
 		}, function()
-			miru.text(selected_name, {
+			miru.text(copy.group(selected_name), {
 				width = "100%",
 				height = 42,
 				size = 16,
@@ -219,14 +221,14 @@ local function surface_demo(width, height)
 						border_color = palette.line,
 						border_width = 1,
 					})
-					miru.text("Layer " .. tostring(index), {
+					miru.text(copy.group("Layer " .. tostring(index)), {
 						width = card_width - 24,
 						height = 22,
 						size = 15,
 					})
-					miru.text("quad + layout", {
+					miru.text(copy.words "quad + layout", {
 						width = card_width - 24,
-						height = 18,
+						height = 36,
 						style = "muted",
 					})
 				end)
@@ -241,7 +243,7 @@ local function separator_demo(width, height)
 	panel(width, height, function(inner_width)
 		title("Separator", "A one-pixel visual rule that participates in the same layout tree.", inner_width)
 		for index, label in ipairs { "Foundation", "Interaction", "Rendering" } do
-			miru.text(label, {
+			miru.text(copy.group(label), {
 				width = inner_width,
 				height = 28,
 				size = 15,
@@ -339,7 +341,7 @@ local function switch_demo(width, height)
 					switch_enabled(not switch_enabled())
 				end,
 			})
-			miru.text(switch_enabled() and "Live updates enabled" or "Live updates paused", {
+			miru.text(copy.group(switch_enabled() and "Live updates enabled" or "Live updates paused"), {
 				width = inner_width - 66,
 				height = 24,
 				size = 15,
@@ -541,7 +543,7 @@ return function()
 	end
 
 	if mobile then
-		local content_width = max(320, screen_width - padding * 2)
+		local content_width = max(1, screen_width - padding * 2)
 		local panel_height = max(470, screen_height - 142)
 		miru.vbox({
 			width = screen_width,
@@ -555,14 +557,14 @@ return function()
 				height = 36,
 				alignItems = "center",
 			}, function()
-				miru.text("MIRU", {
+				miru.text(copy.group "MIRU", {
 					width = 86,
 					height = 36,
 					size = 22,
 					color = palette.dark,
 					align = "LV",
 				})
-				miru.text("Live component workbench", {
+				miru.text(copy.group "Live component workbench", {
 					flex = 1,
 					height = 36,
 					style = "muted",
@@ -597,13 +599,13 @@ return function()
 				width = content_width,
 				gap = 4,
 			}, function()
-				miru.text(current_name, {
+				miru.text(copy.group(current_name), {
 					width = content_width,
 					height = 38,
 					size = 30,
 					color = palette.dark,
 				})
-				miru.text("Inspect the component's real hover, focus, input, and state behavior.", {
+				miru.text(copy.words "Inspect the component's real hover, focus, input, and state behavior.", {
 					width = content_width,
 					height = 20,
 					style = "muted",

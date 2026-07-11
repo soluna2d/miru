@@ -1,3 +1,4 @@
+local copy = require "example.copy"
 local miru = require "miru"
 
 local args = ...
@@ -17,7 +18,7 @@ return function()
 			flex = 1,
 			height = "100%",
 		}, function()
-			miru.text(args.status or "", {
+			miru.text(copy.words(args.status), {
 				width = "100%",
 				height = "100%",
 				size = 12,

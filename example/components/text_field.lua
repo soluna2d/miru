@@ -1,3 +1,4 @@
+local copy = require "example.copy"
 local miru = require "miru"
 
 local args = ...
@@ -35,7 +36,7 @@ return function()
 		width = width,
 		gap = 8,
 	}, function()
-		miru.text(args.label or "", {
+		miru.text(copy.group(args.label), {
 			width = width,
 			height = 18,
 			style = "label",
@@ -57,7 +58,7 @@ return function()
 				border_color = focused and palette.primary or palette.line,
 				border_width = focused and 2 or 1,
 			})
-			miru.text(value ~= "" and value or args.placeholder or "", {
+			miru.text(copy.group(value ~= "" and value or args.placeholder), {
 				width = width - 24,
 				height = 20,
 				size = 15,

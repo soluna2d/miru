@@ -1,4 +1,5 @@
 local icons = require "example.icons"
+local copy = require "example.copy"
 local miru = require "miru"
 
 local args = ...
@@ -52,7 +53,7 @@ return function()
 			border_color = border,
 			border_width = 1,
 		})
-		miru.text(args.label or "", {
+		miru.text(copy.group(args.label), {
 			width = max(0, width - 16 - icon_size - gap),
 			height = max(0, height - 16),
 			size = args.size or 14,
