@@ -3,7 +3,7 @@ local miru = require "miru"
 local args = ...
 
 local progress = miru.animated(function()
-	return args.checked == true and 1 or 0
+	return args.checked and 1 or 0
 end, {
 	duration = 0.12,
 	easing = "out_cubic",
@@ -31,8 +31,8 @@ return function()
 	miru.clickable {
 		enabled = enabled,
 		on_click = function()
-			if args.on_change then
-				args.on_change(args.checked ~= true)
+			if args.on_toggle then
+				args.on_toggle()
 			end
 		end,
 	}

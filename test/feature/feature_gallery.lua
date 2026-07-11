@@ -2,8 +2,6 @@ local miru = require "miru"
 
 local args = ...
 
-local KEY_BACKSPACE <const> = 259
-
 local PAGE <const> = 0xfff8fafc
 local SURFACE <const> = 0xffffffff
 local SURFACE_ALT <const> = 0xfff1f5f9
@@ -18,17 +16,17 @@ local COMPONENTS <const> = {
 	{
 		group = "Foundation",
 		items = {
-			{ name = "Surface", detail = "Rounded material backed panels" },
-			{ name = "Separator", detail = "Hairline layout divider" },
+			{ name = "Surface",    detail = "Rounded material backed panels" },
+			{ name = "Separator",  detail = "Hairline layout divider" },
 			{ name = "IconButton", detail = "Icon-only command button" },
 		},
 	},
 	{
 		group = "Controls",
 		items = {
-			{ name = "Button", detail = "Text and command buttons" },
-			{ name = "Switch", detail = "Animated boolean toggle" },
-			{ name = "Dropdown", detail = "Single menu selection" },
+			{ name = "Button",    detail = "Text and command buttons" },
+			{ name = "Switch",    detail = "Animated boolean toggle" },
+			{ name = "Dropdown",  detail = "Single menu selection" },
 			{ name = "TextField", detail = "Focused single-line input" },
 		},
 	},
@@ -36,9 +34,17 @@ local COMPONENTS <const> = {
 		group = "Application",
 		items = {
 			{ name = "FormActions", detail = "Cancel and save command row" },
-			{ name = "Message", detail = "Chat message bubble" },
+			{ name = "Message",     detail = "Chat message bubble" },
+			{ name = "ScrollArea",  detail = "Clipped wheel interaction" },
 		},
 	},
+}
+
+local DROPDOWN_OPTIONS <const> = {
+	"OpenAI",
+	"OpenAI Codex",
+	"Local Runtime",
+	"Custom Provider",
 }
 
 local function all_components()
@@ -162,8 +168,9 @@ local function metric(label, value, width)
 	end)
 end
 
-local function nav_item(item, selected, on_select, width)
+local function nav_item(item, selected, on_select, width, item_ref)
 	miru.mount("gallery_button", {
+		ref = item_ref,
 		width = width,
 		height = 38,
 		radius = 9,
@@ -175,7 +182,7 @@ local function nav_item(item, selected, on_select, width)
 	})
 end
 
-local function sidebar(selected, on_select, width, height)
+local function sidebar(selected, on_select, width, height, item_refs)
 	local inner_width = width - 36
 	miru.vbox({
 		width = width,
@@ -210,7 +217,8 @@ local function sidebar(selected, on_select, width, height)
 			local group = COMPONENTS[i]
 			section(group.group, inner_width)
 			for j = 1, #group.items do
-				nav_item(group.items[j], selected, on_select, inner_width)
+				local item = group.items[j]
+				nav_item(item, selected, on_select, inner_width, item_refs[item.name])
 			end
 		end
 	end)
@@ -225,7 +233,7 @@ local function surface_demo(width)
 			height = 96,
 			gap = 12,
 		}, function()
-			for i, fill in ipairs({ 0xffffffff, 0xffecfeff, 0xfffff7ed }) do
+			for i, fill in ipairs { 0xffffffff, 0xffecfeff, 0xfffff7ed } do
 				miru.vbox({
 					width = pixel((inner_width - 24) / 3),
 					height = 96,
@@ -265,7 +273,7 @@ local function separator_demo(width)
 	panel(width, 260, function()
 		local inner_width = width - 40
 		title("Separator", "A stable one-pixel divider that participates in Yoga layout.", inner_width)
-		for i, label in ipairs({ "Account", "Runtime", "Network" }) do
+		for i, label in ipairs { "Account", "Runtime", "Network" } do
 			miru.text(label, {
 				width = inner_width,
 				height = 24,
@@ -282,7 +290,7 @@ local function separator_demo(width)
 	end)
 end
 
-local function icon_button_demo(width, count, increment)
+local function icon_button_demo(width, count, increment, button_ref)
 	panel(width, 260, function()
 		local inner_width = width - 40
 		title("IconButton", "Icon-only commands use the same hover and pressed state as text buttons.", inner_width)
@@ -292,6 +300,7 @@ local function icon_button_demo(width, count, increment)
 			gap = 10,
 		}, function()
 			miru.mount("gallery_icon_button", {
+				ref = button_ref,
 				name = "close",
 				on_click = increment,
 			})
@@ -309,7 +318,7 @@ local function icon_button_demo(width, count, increment)
 	end)
 end
 
-local function button_demo(width, count, increment)
+local function button_demo(width, count, increment, button_ref)
 	panel(width, 270, function()
 		local inner_width = width - 40
 		local button_width = pixel(max(84, (inner_width - 24) / 3))
@@ -321,6 +330,7 @@ local function button_demo(width, count, increment)
 			gap = 12,
 		}, function()
 			miru.mount("gallery_button", {
+				ref = button_ref,
 				width = button_width,
 				kind = "primary",
 				label = "Run",
@@ -347,7 +357,7 @@ local function button_demo(width, count, increment)
 	end)
 end
 
-local function switch_demo(width, enabled, set_enabled)
+local function switch_demo(width, enabled, toggle, input_ref)
 	panel(width, 280, function()
 		local inner_width = width - 40
 		title("Switch", "Animated boolean state for settings and provider options.", inner_width)
@@ -358,8 +368,9 @@ local function switch_demo(width, enabled, set_enabled)
 			alignItems = "center",
 		}, function()
 			miru.mount("gallery_switch", {
+				ref = input_ref,
 				checked = enabled,
-				on_change = set_enabled,
+				on_toggle = toggle,
 			})
 			miru.text(enabled and "Enabled" or "Disabled", {
 				width = inner_width - 64,
@@ -373,7 +384,7 @@ local function switch_demo(width, enabled, set_enabled)
 	end)
 end
 
-local function dropdown_demo(width, value, open, toggle, choose)
+local function dropdown_demo(width, value, open, toggle, close, choose, trigger_ref, option_refs)
 	panel(width, 330, function()
 		local inner_width = width - 40
 		title("Dropdown", "A trigger opens a menu and writes the selected action.", inner_width)
@@ -381,24 +392,37 @@ local function dropdown_demo(width, value, open, toggle, choose)
 			width = min(280, inner_width),
 			value = value,
 			open = open,
-			options = { "OpenAI", "OpenAI Codex", "Local Runtime", "Custom Provider" },
+			options = DROPDOWN_OPTIONS,
+			trigger_ref = trigger_ref,
+			option_refs = option_refs,
 			on_toggle = toggle,
+			on_close = close,
 			on_select = choose,
 		})
 	end)
 end
 
-local function text_field_demo(width, value, focused, focus, set_value)
+local function text_field_demo(width, value, input_ref, set_value)
 	panel(width, 280, function()
 		local inner_width = width - 40
 		title("TextField", "Focused single-line editing for provider settings and composer controls.", inner_width)
 		miru.mount("gallery_input", {
+			ref = input_ref,
 			width = min(460, inner_width),
 			label = "Endpoint",
 			placeholder = "https://api.example.local/v1",
 			value = value,
-			focused = focused,
-			on_focus = focus,
+			on_char = function(codepoint)
+				set_value(set_value() .. utf8.char(codepoint))
+			end,
+			on_backspace = function()
+				local current = set_value()
+				local offset = utf8.offset(current, -1)
+				set_value(offset and current:sub(1, offset - 1) or "")
+			end,
+			on_paste = function(text)
+				set_value(set_value() .. text)
+			end,
 		})
 		miru.hbox({
 			width = inner_width,
@@ -409,27 +433,30 @@ local function text_field_demo(width, value, focused, focus, set_value)
 				width = 104,
 				label = "Preset",
 				on_click = function()
-					set_value("https://api.example.local/v1")
+					set_value "https://api.example.local/v1"
 				end,
 			})
 			miru.mount("gallery_button", {
 				width = 104,
 				label = "Clear",
 				on_click = function()
-					set_value("")
+					set_value ""
 				end,
 			})
 		end)
 	end)
 end
 
-local function form_actions_demo(width, action, save, cancel)
+local function form_actions_demo(width, action, save, cancel, save_ref, cancel_ref)
 	panel(width, 240, function()
 		local inner_width = width - 40
 		title("FormActions", "A status line plus cancel/save command row.", inner_width)
 		miru.mount("gallery_form_actions", {
+			save_ref = save_ref,
+			cancel_ref = cancel_ref,
 			width = inner_width,
-			status = action == "Save" and "Saved local draft" or action == "Cancel" and "Discarded local draft" or "Unsaved changes",
+			status = action == "Save" and "Saved local draft" or action == "Cancel" and "Discarded local draft" or
+				"Unsaved changes",
 			on_save = save,
 			on_cancel = cancel,
 		})
@@ -450,63 +477,61 @@ local function message_demo(width)
 			width = min(580, inner_width),
 			role = "assistant",
 			title = "Assistant",
-			body = "This bubble reflows through the injected text engine and keeps the panel height in Yoga layout.",
+			body = "This bubble reflows through Miru text styles and keeps the panel height in Yoga layout.",
 		})
 	end)
 end
 
-local selected = miru.value("Switch")
+local function scroll_area_demo(width, input_ref, offset, set_offset)
+	panel(width, 330, function()
+		local inner_width = width - 40
+		title("ScrollArea", "Miru clips overflow and routes wheel input to the owning component.", inner_width)
+		miru.mount("gallery_scroll", {
+			ref = input_ref,
+			width = min(520, inner_width),
+			height = 132,
+			offset = offset,
+			on_scroll = function(delta)
+				set_offset(clamp(set_offset() + delta * 18, 0, 84))
+			end,
+		})
+		metric("Scroll offset", tostring(offset), 190)
+	end)
+end
+
+local selected = miru.value "Switch"
 local button_count = miru.value(0)
 local icon_button_count = miru.value(0)
-local text_value = miru.value("https://api.example.local/v1")
-local text_focused = miru.value(false)
+local text_value = miru.value "https://api.example.local/v1"
 local switch_enabled = miru.value(true)
 local dropdown_open = miru.value(false)
-local dropdown_value = miru.value("OpenAI")
-local form_action = miru.value("None")
+local dropdown_value = miru.value "OpenAI"
+local form_action = miru.value "None"
+local scroll_offset = miru.value(0)
+local component_refs = {}
+for i = 1, #ALL_COMPONENTS do
+	component_refs[ALL_COMPONENTS[i]] = miru.ref()
+end
+local control_refs = {
+	button = miru.ref(),
+	dropdown_trigger = miru.ref(),
+	form_cancel = miru.ref(),
+	form_save = miru.ref(),
+	icon_button = miru.ref(),
+	scroll_area = miru.ref(),
+	switch = miru.ref(),
+	text_field = miru.ref(),
+}
+local dropdown_option_refs = {}
+for i = 1, #DROPDOWN_OPTIONS do
+	local option = DROPDOWN_OPTIONS[i]
+	dropdown_option_refs[option] = miru.ref()
+end
 
 miru.expose {
-	select_component = function(name)
-		selected(name)
-	end,
-	press_primary_button = function()
-		button_count(button_count() + 1)
-	end,
-	press_icon_button = function()
-		icon_button_count(icon_button_count() + 1)
-	end,
-	toggle_switch = function()
-		switch_enabled(not switch_enabled())
-	end,
-	set_switch_enabled = function(enabled)
-		switch_enabled(enabled == true)
-	end,
-	focus_text_field = function()
-		text_focused(true)
-	end,
-	type_text = function(text)
-		if text_focused() then
-			text_value(text_value() .. text)
-		end
-	end,
-	key = function(keycode)
-		if text_focused() and keycode == KEY_BACKSPACE then
-			local value = text_value()
-			text_value(value:sub(1, #value - 1))
-		end
-	end,
-	toggle_dropdown = function()
-		dropdown_open(not dropdown_open())
-	end,
-	choose_dropdown = function(value)
-		dropdown_value(value)
-		dropdown_open(false)
-	end,
-	save_form = function()
-		form_action("Save")
-	end,
-	cancel_form = function()
-		form_action("Cancel")
+	target_rect = function(name)
+		local ref = component_refs[name] or control_refs[name] or dropdown_option_refs[name]
+		return ref and ref:window_rect() or nil
 	end,
 }
 
@@ -526,7 +551,9 @@ return function()
 		report.text_value = text_value()
 		report.switch_enabled = switch_enabled()
 		report.dropdown_action = dropdown_value()
+		report.dropdown_open = dropdown_open()
 		report.form_action = form_action()
+		report.scroll_offset = scroll_offset()
 	end
 
 	miru.hbox({
@@ -539,7 +566,7 @@ return function()
 	}, function()
 		sidebar(selected_name, function(name)
 			selected(name)
-		end, metrics.sidebar_width, metrics.sidebar_height)
+		end, metrics.sidebar_width, metrics.sidebar_height, component_refs)
 		miru.vbox({
 			width = metrics.content_width,
 			gap = 18,
@@ -568,34 +595,40 @@ return function()
 			elseif selected_name == "IconButton" then
 				icon_button_demo(metrics.panel_width, icon_button_count(), function()
 					icon_button_count(icon_button_count() + 1)
-				end)
+				end, control_refs.icon_button)
 			elseif selected_name == "Button" then
 				button_demo(metrics.panel_width, button_count(), function()
 					button_count(button_count() + 1)
-				end)
+				end, control_refs.button)
 			elseif selected_name == "Switch" then
-				switch_demo(metrics.panel_width, switch_enabled(), switch_enabled)
+				switch_demo(metrics.panel_width, switch_enabled(), function()
+					switch_enabled(not switch_enabled())
+				end, control_refs.switch)
 			elseif selected_name == "Dropdown" then
 				dropdown_demo(metrics.panel_width, dropdown_value(), dropdown_open(), function()
 					dropdown_open(not dropdown_open())
+				end, function()
+					dropdown_open(false)
 				end, function(value)
 					dropdown_value(value)
 					dropdown_open(false)
-				end)
+				end, control_refs.dropdown_trigger, dropdown_option_refs)
 			elseif selected_name == "TextField" then
-				text_field_demo(metrics.panel_width, text_value(), text_focused(), function()
-					text_focused(true)
-				end, text_value)
+				text_field_demo(metrics.panel_width, text_value(), control_refs.text_field, text_value)
 			elseif selected_name == "FormActions" then
 				form_actions_demo(metrics.panel_width, form_action(), function()
-					form_action("Save")
+					form_action "Save"
 				end, function()
-					form_action("Cancel")
-				end)
+					form_action "Cancel"
+				end, control_refs.form_save, control_refs.form_cancel)
 			elseif selected_name == "Message" then
 				message_demo(metrics.panel_width)
+			elseif selected_name == "ScrollArea" then
+				scroll_area_demo(metrics.panel_width, control_refs.scroll_area, scroll_offset(), scroll_offset)
 			else
-				switch_demo(metrics.panel_width, switch_enabled(), switch_enabled)
+				switch_demo(metrics.panel_width, switch_enabled(), function()
+					switch_enabled(not switch_enabled())
+				end, control_refs.switch)
 			end
 			miru.hbox({
 				width = metrics.panel_width,

@@ -11,7 +11,6 @@ return function()
 	}, function()
 		miru.text(args.text, {
 			ref = text_ref,
-			advance = 10,
 			line_height = 20,
 		})
 	end)

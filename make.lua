@@ -83,6 +83,7 @@ local shdc_paths = {
 	linux = "$PATH/$NAME",
 }
 
+---@diagnostic disable-next-line: unnecessary-assert
 local shdc = assert(shdc_paths[lm.os]):gsub("%$(%u+)", {
 	PATH = tostring(lm.basedir / "soluna/bin/sokol-tools-bin/bin" / shdc_plat()),
 	NAME = "sokol-shdc",
@@ -128,8 +129,7 @@ local rounded_shader = compile_shader("test/src/rounded_rect.glsl", "rounded_rec
 lm:dll "miru_test" {
 	sources = {
 		"soluna/extlua/extlua.c",
-		"soluna/extlua/sokolapi.c",
-		"soluna/extlua/solunaapi.c",
+		"soluna/extlua/materialapi.c",
 		"test/src/miru_test.c",
 		"test/src/material_rounded_rect.c",
 	},

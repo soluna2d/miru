@@ -26,6 +26,7 @@ return function()
 			end
 		end)
 		miru.mount("gallery_button", {
+			ref = args.cancel_ref,
 			width = 96,
 			height = height,
 			label = args.cancel_label or "Cancel",
@@ -33,6 +34,7 @@ return function()
 			on_click = args.on_cancel,
 		})
 		miru.mount("gallery_button", {
+			ref = args.save_ref,
 			width = 96,
 			height = height,
 			kind = "primary",

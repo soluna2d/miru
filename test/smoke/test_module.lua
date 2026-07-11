@@ -9,7 +9,11 @@ function M.run()
 	assert(type(miru.box) == "function")
 	assert(type(miru.canvas) == "function")
 	assert(type(miru.text) == "function")
+	assert(type(miru.text_styles) == "function")
 	assert(type(miru.use) == "function")
+	assert(type(miru.focusable) == "function")
+	assert(type(miru.scrollable) == "function")
+	assert(type(miru.focused) == "function")
 end
 
 return M

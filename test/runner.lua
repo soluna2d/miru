@@ -69,8 +69,10 @@ local function run_cases(kind, args, names)
 			local case = load_case(kind, name)
 			if case.run then
 				case.run(args)
-			elseif kind == "smoke" then
-				error("smoke test " .. name .. " must expose run(args)", 2)
+			elseif case.app then
+				error(kind .. " app test " .. name .. " requires TEST_NAME", 2)
+			else
+				error(kind .. " test " .. name .. " must expose run(args) or app(args)", 2)
 			end
 		end
 		app.quit()

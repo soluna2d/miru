@@ -1,126 +1,95 @@
 ---
 name: miru
-description: Use when modifying the Miru Lua UI runtime, plans, examples, tests, or skills in this repository. Covers signal-native retained UI graph design, miru.lua, Soluna batch/Yoga integration, component ownership, host bindings, control flow, refs, interaction state, canvas drawing, animation, and focused verification.
+description: Use when modifying the Miru Lua UI runtime, components, examples, tests, native material glue, or Soluna integration in this repository.
 ---
 
 # Miru
 
-Miru is a standalone Lua UI runtime for Soluna 2D. It was seeded from Soluna Playground's `core/view.lua`, but the target design is signal-native and has no compatibility obligation to the old view API.
+Miru is a reactive UI runtime for Soluna 2D. The current implementation uses component chunks, component-owned reactive state, a unified Yoga tree, and a compiled batch command tree. It does not implement a virtual DOM or use proxy tables as a general state model.
 
 ## Design Checklist
 
-Before editing runtime behavior, examples, or tests, identify:
+Before editing runtime behavior, components, examples, or tests, identify:
 
-- **Owner**: root, component, host node, control-flow range, canvas, animation, or external caller.
-- **Role**: reactive kernel, retained tree, layout bridge, drawing bridge, interaction primitive, component primitive, test fixture, or planning document.
-- **Signal boundary**: distinguish static values, signal/memo values, callbacks, and control-flow children.
-- **Structure boundary**: component build establishes stable structure; dynamic structure must go through explicit control-flow primitives.
-- **Binding boundary**: host props, text, canvas draw commands, and animation targets update through binding effects, not component rerender.
-- **Dirty class**: classify changes as structure, layout, paint, canvas, or command dirty.
-- **Geometry**: refs and pointer events read from the retained calculated tree and expose owner-local coordinates.
-- **API surface**: add runtime APIs only when they support the signal-native model or a current testable use case.
+- **Owner**: root, feature component, visual component, interaction helper, or host callback.
+- **Role**: reusable product component, demo-specific component, visual primitive, interaction helper, or runtime fixture.
+- **Built-ins**: prefer `miru.value`, `miru.computed`, `miru.animated`, `miru.hovered`, `miru.pressed`, `miru.focused`, `miru.ref`, `miru.clickable`, `miru.focusable`, `miru.scrollable`, and `miru.dismissable`.
+- **Event flow**: children report interaction intent through callback props; the parent that owns state performs the mutation.
+- **Geometry**: create `miru.ref()` inside the geometry owner. Use `ref:rect()` inside components and `ref:window_rect()` only for host bridges that need window coordinates.
+- **Drawing**: keep tightly aligned backgrounds, text, icons, and selection visuals in one owner-controlled coordinate system.
 
-## Current Direction
+## Component Model
 
-Follow the active plan:
-
-- `plans/2026-06-12_signal_native_runtime/plan.md`
-- `plans/2026-06-12_signal_native_runtime/tasks.md`
-
-The target model:
-
-```text
-signal write
--> affected memo/effect invalidation
--> affected host binding/control-flow/canvas update
--> dirty root classification
--> one layout pass if needed
--> one command compilation if needed
--> Soluna batch draw
-```
-
-Do not implement Vue-style proxy tables or component rerender as the main reactive path.
-
-## Component Shape
-
-Component chunks still return a build function, but the build function should be treated as mount-time graph construction, not a render effect.
+A component chunk receives props and returns a render function:
 
 ```lua
 local miru = require "miru"
 
 local args = ...
-local count = miru.signal(0)
+local count = miru.value(0)
 
 return function()
-	miru.hbox({
+	miru.clickable {
+		on_click = function()
+			count(count() + 1)
+		end,
+	}
+	miru.text("Count: " .. tostring(count()), {
 		width = args.width,
-		height = 36,
-	}, function()
-		miru.text(miru.memo(function()
-			return "Count: " .. tostring(count())
-		end))
-	end)
+	})
 end
 ```
 
-Signal reads in component build scope should not silently subscribe the component. Dynamic values belong in `miru.memo`, `miru.effect`, host prop bindings, canvas draw scopes, or explicit control-flow primitives.
+Reactive values read by the render function invalidate and rerender the owning component. Ordinary props are snapshots from the parent's current render. Consecutive events in one frame must not accumulate state through a stale prop snapshot; report intent to the actual state owner instead.
 
-## Reactive Primitives
+## Text
 
-Prefer these names for new runtime design:
+Register text styles before mounting any component that contains `miru.text`:
 
-- `miru.signal(initial)`
-- `miru.memo(fn)`
-- `miru.effect(fn)`
-- `miru.batch(fn)`
-- `miru.untrack(fn)`
-- `miru.get(value)`
+```lua
+view:text_styles {
+	font = font.cobj(),
+	default_font = fontid,
+	default = "body",
+	body = {
+		size = 15,
+		line_height = 20,
+		color = 0xff111827,
+	},
+}
+```
 
-`memo` should be lazy and cached. `effect` should belong to an owner scope and clean up dependencies on rerun or disposal.
+Miru uses `soluna.material.text` directly. Do not restore the old `miru.new { text_engine = ... }` contract. Text nodes support named styles, node-local font/size/color/line-height overrides, vertical alignment, wrapping, scroll offsets, and overflow clipping.
 
-## Retained Tree
+## Interaction And Geometry
 
-Use one retained tree and one Yoga tree per mounted root.
+- Route host mouse input through `view:pointer`, `view:mouse_button`, and `view:mouse_scroll`.
+- Route host text input through `view:char`, `view:key`, and `view:clipboard_pasted`; the focused component consumes it.
+- Use `miru.dismissable` for dropdowns, popovers, and menus instead of implementing a global outside-click registry.
+- `overflow = "hidden"` and `overflow = "scroll"` constrain both drawing and hit testing.
+- Pointer event `x/y` values are local to the current component; `client_x/client_y` values are window coordinates.
 
-- Component wrappers, host nodes, text nodes, canvas nodes, and control-flow anchors participate in the same tree.
-- Component build creates nodes once.
-- `when`, `switch`, and keyed `each` own dynamic structure.
-- Destroying a component or range must dispose owned effects, refs, interaction state, canvas commands, animations, and Yoga nodes.
+## Canvas And Native Materials
 
-## Host Binding
+A `miru.canvas` draw callback records commands. Use the `miru.batch:add`, `miru.batch:layer`, and related proxies there; the commands execute against the real batch during `view:draw(batch)`.
 
-Host node props store raw and resolved values separately.
+Native materials use the current Soluna `materialapi` contract:
 
-- Layout props mark layout dirty.
-- Draw-only props mark paint/command dirty.
-- Canvas dependency changes mark only the canvas dirty.
-- Multiple writes in one batch should produce one root flush.
+- The C extension initializes `luaapi_init` and `materialapi_init`.
+- The C module creates streams with `material_push` and exports `hooks` plus `instance_size`.
+- The Lua material binds the instance buffer, storage view, SR buffer, and hooks through `soluna.material.ext.new`.
 
-Callbacks are ordinary functions and must not be confused with reactive getters.
-
-## Interaction
-
-Interaction state should be signal-backed:
-
-- `miru.hovered()`
-- `miru.pressed()`
-- `miru.ref()`
-- `miru.clickable(props)`
-- `miru.dismissable(props)`
-
-Hit testing should use calculated retained-tree geometry. Pointer events should report owner-local coordinates.
+Do not restore the removed `sokolapi`, `solunaapi`, or legacy stream submission APIs.
 
 ## Verification
 
-When changing `miru.lua`, add or update focused tests for the changed primitive first.
+Run focused tests before the complete smoke suite and automated gallery regression:
 
-Prioritize verification in this order:
+```sh
+./soluna/bin/luamake-bin/bin/osx_arm64/luamake -mode debug
+TEST_KIND=smoke TEST_NAME=interaction ./soluna/bin/macos/debug/soluna test.dl
+./soluna/bin/macos/debug/soluna test.dl
+TEST_KIND=feature TEST_NAME=gallery TEST_FRAMES=11 ./soluna/bin/macos/debug/soluna test.dl
+```
 
-1. Reactive kernel tests: signal, memo, effect cleanup, batch, untrack.
-2. Retained tree tests: insertion, removal, keyed reorder, destroy cleanup.
-3. Layout tests: Yoga dirty classification, intrinsic size, parent-size propagation.
-4. Binding tests: text, layout prop, paint prop, canvas dependency isolation.
-5. Interaction tests: hover, pressed, click, dismissable, ref coordinates.
-6. Animation tests: tween signal, transition lifecycle, cleanup.
-
-If the repository does not yet have a runnable test harness for a changed area, add the smallest harness needed before claiming the behavior is verified.
+After Lua API or annotation changes, run clean headless Neovim diagnostics with `emmylua_ls` on the touched files. Format only touched files, then review the complete diff and run `git diff --check`.

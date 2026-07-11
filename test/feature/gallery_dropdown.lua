@@ -4,6 +4,7 @@ local args = ...
 
 local function Option(option, width)
 	miru.mount("gallery_button", {
+		ref = args.option_refs and args.option_refs[option],
 		width = width,
 		height = 32,
 		radius = 6,
@@ -19,12 +20,16 @@ end
 
 return function()
 	local width = args.width or 260
-	local open = args.open == true
+	local open = args.open
+	miru.dismissable(open and {
+		on_dismiss = args.on_close,
+	} or nil)
 	miru.vbox({
 		width = width,
 		gap = 8,
 	}, function()
 		miru.mount("gallery_button", {
+			ref = args.trigger_ref,
 			width = width,
 			height = 38,
 			label = args.value or "Select",

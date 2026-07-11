@@ -1,4 +1,5 @@
 local render = require "soluna.render"
+local matext = require "soluna.material.ext"
 local rounded_rect = require "test.material.rounded_rect_native"
 
 local ctx = ...
@@ -16,26 +17,15 @@ local inst_buffer = render.buffer {
 
 local bindings = render.bindings()
 bindings:vbuffer(0, inst_buffer)
+bindings:view(0, state.views.storage)
 
-local cobj = rounded_rect.new {
+return matext.new {
+	id = ctx.id,
+	instance_size = rounded_rect.instance_size,
 	inst_buffer = inst_buffer,
 	bindings = bindings,
 	uniform = state.uniform,
-	tmp_buffer = ctx.tmp_buffer,
+	sr_buffer = state.srbuffer_mem,
+	hooks = rounded_rect.hooks,
+	label = "miru-test-rounded-rect-pipeline",
 }
-
-local material = {}
-
-function material.reset()
-	cobj:reset()
-end
-
-function material.submit(ptr, n)
-	cobj:submit(ptr, n)
-end
-
-function material.draw(ptr, n)
-	cobj:draw(ptr, n)
-end
-
-return material
