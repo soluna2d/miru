@@ -1,0 +1,12 @@
+entry : example/main.lua
+width : 1180
+height : 720
+high_dpi : true
+window_title : "Miru Component Workbench"
+background : 0xfff4f7f6
+text_sampler :
+  min_filter : linear
+  mag_filter : linear
+  wrap_u : edge
+  wrap_v : edge
+  wrap_w : edge

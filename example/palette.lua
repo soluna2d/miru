@@ -1,0 +1,17 @@
+return {
+	page = 0xfff4f7f6,
+	surface = 0xffffffff,
+	surface_alt = 0xffeaf0ee,
+	line = 0xffbdc9c5,
+	muted = 0xff5b6965,
+	text = 0xff14201d,
+	primary = 0xff087f73,
+	primary_hover = 0xff0a9d8e,
+	primary_pressed = 0xff06685f,
+	primary_soft = 0xffd9f3ef,
+	accent = 0xffed6a5a,
+	accent_soft = 0xffffe8e3,
+	warning = 0xfff4c95d,
+	dark = 0xff132a25,
+	white = 0xffffffff,
+}

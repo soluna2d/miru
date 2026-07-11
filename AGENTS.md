@@ -20,19 +20,19 @@
 ## Repository
 
 - Soluna should be kept as a git submodule.
-- Keep dependency code out of this repository unless it is Miru-owned glue, fixtures, tests, or configuration.
+- Keep dependency code out of this repository unless it is Miru-owned example glue or configuration.
+- `miru.lua` is the framework runtime. Public example and documentation sources live under `example/`.
+- The documentation site must keep its own information architecture and visual language. Reuse Soluna's validated WebAssembly and Pages build mechanism, not the Soluna website implementation or styles.
 
-## Tests
+## Example
 
-- The unified test entry is `test.dl`.
-- `test.dl` should point to `test.lua`.
-- `test.lua` should delegate to `test.runner`.
-- Test files live only under `test/smoke` and `test/feature`.
-- The runner should collect `test/{smoke,feature}/test_*.lua`.
-- Do not add alternate test entry files for focused tests; use `TEST_KIND` and `TEST_NAME` selection through the unified runner.
+- `example/main.game` is the native example entry.
+- Components live under `example/components/` and should depend only on Miru and Soluna public modules.
+- `example/site/` is a static documentation shell; `example/scripts/build-site.mjs` packages the same Lua example for WebAssembly.
+- Keep component examples independently inspectable and interactive. They demonstrate patterns, not a bundled design system.
 
 ## Verification
 
-- Run focused tests for changed behavior before claiming completion.
-- When changing runtime behavior, add or update tests first where practical.
+- Run the native example for changed component behavior.
+- Build the WebAssembly documentation artifact and validate it in a real browser at desktop and mobile viewports.
 - State exactly which commands were run and whether they passed.
