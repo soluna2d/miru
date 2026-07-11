@@ -1,3 +1,4 @@
+local copy = require "example.copy"
 local miru = require "miru"
 
 local args = ...
@@ -47,7 +48,7 @@ return function()
 				height = 8,
 				background = role_color,
 			}
-			miru.text(args.title or role, {
+			miru.text(copy.group(args.title or role), {
 				width = width - 44,
 				height = 20,
 				style = "label",
@@ -55,7 +56,7 @@ return function()
 				align = "LV",
 			})
 		end)
-		miru.text(args.body or "", {
+		miru.text(copy.words(args.body), {
 			width = width - 28,
 			size = args.size or 14,
 			color = palette.text,

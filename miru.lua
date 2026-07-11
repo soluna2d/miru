@@ -1763,7 +1763,7 @@ local View = {}; do
 						if id then
 							append_style(chunks, current, id)
 						else
-							chunks[#chunks + 1] = "[[" .. name .. "]"
+							chunks[#chunks + 1] = "[" .. name .. "]"
 						end
 					end
 					position = close + 1
@@ -3100,6 +3100,8 @@ function M.canvas(props, draw)
 	return ctx.view:render_canvas(props, draw)
 end
 
+---Named text styles use `[name]` / `[n]`. Other complete tagged-text controls
+---pass through to the Soluna material text layout engine.
 ---@param text any
 ---@param props table?
 ---@return MiruRenderNode

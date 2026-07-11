@@ -1,3 +1,4 @@
+local copy = require "example.copy"
 local miru = require "miru"
 
 local args = ...
@@ -54,7 +55,7 @@ return function()
 							fill = palette.surface_alt,
 						})
 					end
-					miru.text("Virtual row " .. tostring(i), {
+					miru.text(copy.group("Virtual row " .. tostring(i)), {
 						width = width - 36,
 						height = 16,
 						size = 13,
