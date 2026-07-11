@@ -1,4 +1,7 @@
 local matquad = require "soluna.material.quad"
+local matclip = require "soluna.material.clip"
+local mattext = require "soluna.material.text"
+local soluna = require "soluna"
 local yoga = require "soluna.layout.yoga"
 local floor = math.floor
 local min = math.min
@@ -11,6 +14,18 @@ local max = math.max
 local file = require "soluna.file"
 
 local COMPONENT_PATH <const> = "?.lua;?/init.lua"
+local TEXT_NOWRAP_WIDTH <const> = 4096
+---@type table<string, fun(args: table): fun()>
+local components = setmetatable({}, {
+	__mode = "v",
+})
+---@type soluna.MouseCursor
+---@diagnostic disable-next-line: assign-type-mismatch
+local POINTER_CURSOR <const> = "pointing_hand"
+---@type soluna.MouseCursor
+---@diagnostic disable-next-line: assign-type-mismatch
+local DISABLED_CURSOR <const> = "not_allowed"
+local DEFAULT_CURSOR <const> = "default"
 
 ---@class MiruCommand
 ---@field name string
@@ -41,26 +56,52 @@ local COMPONENT_PATH <const> = "?.lua;?/init.lua"
 ---@field parent MiruRenderNode?
 ---@field children MiruRenderNode[]
 ---@field cursor integer
----@field instance MiruInstance?
----@field owner MiruInstance?
+---@field instance MiruComponent?
+---@field owner MiruComponent?
 ---@field draw fun(width: number, height: number, frame?: integer)?
 ---@field commands MiruCommand[]?
 ---@field props table?
 ---@field text any
 ---@field text_layout MiruTextLayout?
+---@field text_metrics MiruTextMetrics?
 ---@field ref MiruRef?
 ---@field slot_name string?
 
----@class MiruTextEngine
----@field layout fun(args: table): MiruTextLayout?
----@field draw? fun(batch: MiruBatch, layout: MiruTextLayout, x: number, y: number, width: number, height: number)
-
----@class MiruTextLayout
+---@class MiruTextMetrics
 ---@field height number
 ---@field width? number
 ---@field line_height? number
 ---@field line_count? number
----@field draw? fun(self: MiruTextLayout, batch: MiruBatch, x?: number, y?: number)
+
+---@class MiruTextLayout: MiruTextMetrics
+---@field stream string
+---@field query table
+---@field height number
+---@field width? number
+---@field line_height? number
+---@field line_count? number
+---@field scroll_y number?
+---@field vertical_align string
+---@field draw fun(self: MiruTextLayout, batch: MiruBatch, x?: number, y?: number, width?: number, height?: number)
+
+---@class MiruTextStyleRegistry
+---@field font lightuserdata?
+---@field default_font integer?
+---@field default string?
+---@field [string] table?
+
+---@class MiruTextStyles
+---@field font lightuserdata
+---@field styles userdata
+---@field specs table[]
+---@field ids table<string, integer>
+---@field default string
+---@field builders table<string, MiruTextBuilder?>
+---@field derived table<string, MiruTextStyles>?
+
+---@class MiruTextBuilder
+---@field block fun(text: string, width?: number, height?: number): string
+---@field layout fun(text: string, width?: number, height?: number): table
 
 ---@class MiruLayout
 ---@field x number?
@@ -68,7 +109,7 @@ local COMPONENT_PATH <const> = "?.lua;?/init.lua"
 ---@field w number?
 ---@field h number?
 
----@alias MiruHitMode "clickable"|"component"
+---@alias MiruHitMode "clickable"|"target"|"focusable"|"scrollable"
 
 ---@class MiruBatch
 ---@field layer fun(self: MiruBatch, ...: number)
@@ -113,19 +154,25 @@ local COMPONENT_PATH <const> = "?.lua;?/init.lua"
 
 ---@type fun(node: MiruRenderNode)
 local dispose_render_instances
----@type fun(instance: MiruInstance): MiruInstance
+---@type fun(component: MiruComponent): MiruComponent
 local root_instance
----@type fun(instance: MiruInstance): MiruCommand[]
+---@type fun(component: MiruComponent): MiruCommand[]
 local compile_render_tree
 ---@type fun(view: MiruView)
 local flush_dirty_roots
----@type fun(view: MiruView, root: MiruInstance)
+---@type fun(spec: MiruTextStyleRegistry): MiruTextStyles
+local build_text_styles
+---@type fun(view: MiruView, root: MiruComponent)
 local schedule_render_tree_compile
 
 ---@class (partial) MiruInstance
+---@field args table
+
+---@class (partial) MiruComponent
+---@field ["public"] MiruInstance
 ---@field view MiruView
----@field parent MiruInstance?
----@field children MiruInstance[]
+---@field parent MiruComponent?
+---@field children MiruComponent[]
 ---@field layout MiruLayout
 ---@field disposables MiruDisposable[]?
 ---@field mounted boolean?
@@ -134,40 +181,50 @@ local schedule_render_tree_compile
 ---@field render_node MiruRenderNode?
 ---@field layout_version MiruValue<integer>
 ---@field props table
----@field args table
 ---@field clickable MiruClickable?
----@field clickable_prop_bindings table<any, string>?
+---@field focusable MiruFocusable?
+---@field scrollable MiruScrollable?
 ---@field dismissable MiruDismissable?
 ---@field dismissable_index integer?
+---@field prop_bindings MiruPropBinding[]?
+---@field targetable true?
 ---@field hovered MiruValue<boolean>?
 ---@field pressed MiruValue<boolean>?
+---@field focused MiruValue<boolean>?
 ---@field ref MiruRef?
 ---@field slot_name string?
 
 ---@class (partial) MiruView
 ---@field scope MiruScope
----@field instances MiruInstance[]
+---@field instances MiruComponent[]
 ---@field w number
 ---@field h number
 ---@field layout_version MiruValue<integer>
 ---@field pointer_x number?
 ---@field pointer_y number?
----@field hovered_instance MiruInstance?
----@field pressed_instance MiruInstance?
+---@field hovered_instance MiruComponent?
+---@field hovered_chain MiruComponent[]?
+---@field clickable_hovered_instance MiruComponent?
+---@field pressed_instance MiruComponent?
 ---@field pressed_button integer?
+---@field focused_instance MiruComponent?
+---@field pressed_scrollable_instance MiruComponent?
+---@field pressed_scrollable_button integer?
+---@field mouse_cursor soluna.MouseCursor?
 ---@field stats MiruStatistics
 ---@field provides table
 ---@field animations MiruAnimation[]
----@field dismissables MiruInstance[]
+---@field dismissables MiruComponent[]
 ---@field effect_order integer
----@field slots table<string, MiruInstance?>
+---@field slots table<string, MiruComponent?>
 ---@field frame integer
----@field dirty_roots table<MiruInstance, boolean>
----@field dirty_root_order MiruInstance[]
+---@field dirty_roots table<MiruComponent, boolean>
+---@field dirty_root_order MiruComponent[]
+---@field text_style_registry MiruTextStyles?
 
 ---@class MiruContext
 ---@field view MiruView
----@field instance MiruInstance?
+---@field instance MiruComponent?
 ---@field disposables MiruDisposable[]?
 ---@field drawing boolean?
 ---@field rendering boolean?
@@ -175,7 +232,7 @@ local schedule_render_tree_compile
 
 ---@class MiruRenderContext
 ---@field view MiruView
----@field instance MiruInstance
+---@field instance MiruComponent
 ---@field parent MiruRenderNode
 
 ---@class MiruPointerEvent
@@ -185,21 +242,43 @@ local schedule_render_tree_compile
 ---@field view MiruView
 ---@field x number
 ---@field y number
+---@field client_x number
+---@field client_y number
 ---@field local_x number
 ---@field local_y number
 ---@field button integer?
+---@field scroll_x number?
+---@field scroll_y number?
 
 ---@class MiruDismissable
 ---@field enabled? any
 ---@field on_dismiss? fun(event: MiruPointerEvent)
 
+---@alias MiruCursor soluna.MouseCursor|"default"
+
 ---@class MiruClickable
 ---@field enabled? any
+---@field cursor? MiruCursor
 ---@field on_click? fun(event: MiruPointerEvent)
 ---@field on_pointer_down? fun(event: MiruPointerEvent)
 ---@field on_pointer_up? fun(event: MiruPointerEvent)
 ---@field on_pointer_enter? fun(event: MiruPointerEvent)
 ---@field on_pointer_leave? fun(event: MiruPointerEvent)
+---@field on_pointer_move? fun(event: MiruPointerEvent)
+
+---@class MiruFocusable
+---@field enabled? any
+---@field on_focus? fun()
+---@field on_blur? fun()
+---@field on_char? fun(event: table)
+---@field on_key? fun(event: table)
+---@field on_clipboard_pasted? fun(event: table)
+
+---@class MiruScrollable
+---@field enabled? any
+---@field on_scroll? fun(event: MiruPointerEvent)
+---@field on_pointer_down? fun(event: MiruPointerEvent)
+---@field on_pointer_up? fun(event: MiruPointerEvent)
 ---@field on_pointer_move? fun(event: MiruPointerEvent)
 
 ---@class MiruRect
@@ -211,18 +290,23 @@ local schedule_render_tree_compile
 ---@class MiruStatistics
 ---@field render_count integer
 
+---@class MiruPropBinding
+---@field target table
+---@field fields table<any, string>
+
 ---@class (partial) MiruRef
 --- A component-owned geometry handle.
 --- `rect()` returns the target geometry in the coordinate space of the component that created the ref.
----@field owner MiruInstance
 ---@field current any
 ---@field rect fun(self: MiruRef): MiruRect?
+---@field window_rect fun(self: MiruRef): MiruRect?
 
 ---@class MiruModule
 ---@field batch MiruBatch
 ---@field new fun(args?: table): MiruView
 ---@field value fun(value: any): MiruValue<any>
 ---@field use fun(name: string): any
+---@field text_styles fun(spec: MiruTextStyleRegistry)
 ---@field mount fun(chunk: string, props?: table, parent?: MiruInstance): MiruInstance
 ---@field slot fun(name: string, props?: table): MiruInstance
 ---@field expose fun(methods: table)
@@ -232,9 +316,12 @@ local schedule_render_tree_compile
 ---@field canvas fun(props?: table, draw?: fun(width: number, height: number, frame?: integer)): MiruRenderNode
 ---@field text fun(text: any, props?: table): MiruRenderNode
 ---@field clickable fun(props?: MiruClickable)
+---@field focusable fun(props?: MiruFocusable)
+---@field scrollable fun(props?: MiruScrollable)
 ---@field dismissable fun(props?: MiruDismissable)
 ---@field hovered fun(): MiruValue<boolean>
 ---@field pressed fun(): MiruValue<boolean>
+---@field focused fun(): MiruValue<boolean>
 ---@field ref fun(): MiruRef
 ---@field computed fun(fn: function): MiruComputed<any>
 ---@field animated fun(fn: MiruAnimatedTarget, opts?: table): MiruAnimation
@@ -250,32 +337,70 @@ local active_render
 ---@type MiruCommand[]?
 local active_batch
 
----@param view MiruView
+---@type table<MiruInstance, MiruComponent?>
+local component_by_instance = setmetatable({}, {
+	__mode = "kv",
+})
+
+---@type table<table, MiruComponent?>
+local component_by_args = setmetatable({}, {
+	__mode = "kv",
+})
+
+---@type table<MiruRef, MiruComponent?>
+local ref_owners = setmetatable({}, {
+	__mode = "kv",
+})
+
+---@type table<MiruRef, MiruComponent|MiruRenderNode|nil>
+local ref_targets = setmetatable({}, {
+	__mode = "kv",
+})
+
 ---@param instance MiruInstance
-local function register_dismissable(view, instance)
-	if instance.dismissable_index then
+---@return MiruComponent
+local function component_of(instance)
+	local component = component_by_instance[instance]
+	assert(component, "stale Miru instance")
+	return component
+end
+
+---@param target MiruComponent|MiruRenderNode?
+---@return MiruInstance?
+local function public_target(target)
+	if not target or target.node then
+		return nil
+	end
+	---@cast target MiruComponent
+	return target.public
+end
+
+---@param view MiruView
+---@param component MiruComponent
+local function register_dismissable(view, component)
+	if component.dismissable_index then
 		return
 	end
 	local dismissables = view.dismissables
 	local index = #dismissables + 1
-	dismissables[index] = instance
-	instance.dismissable_index = index
+	dismissables[index] = component
+	component.dismissable_index = index
 end
 
----@param instance MiruInstance
-local function unregister_dismissable(instance)
-	local index = instance.dismissable_index
+---@param component MiruComponent
+local function unregister_dismissable(component)
+	local index = component.dismissable_index
 	if not index then
 		return
 	end
-	local dismissables = instance.view.dismissables
+	local dismissables = component.view.dismissables
 	local last = dismissables[#dismissables]
 	dismissables[index] = last
 	dismissables[#dismissables] = nil
-	if last and last ~= instance then
+	if last and last ~= component then
 		last.dismissable_index = index
 	end
-	instance.dismissable_index = nil
+	component.dismissable_index = nil
 end
 
 ---@param name string
@@ -374,7 +499,11 @@ local function use_provide(name)
 	---@cast active MiruContext
 	local view = active.view
 	view.scope:track(view.provides, name)
-	return assert(view.provides[name])
+	local value = view.provides[name]
+	if not value then
+		error("missing Miru provide: " .. tostring(name), 2)
+	end
+	return value
 end
 
 ---@type fun(target: any): MiruRect?
@@ -386,11 +515,14 @@ local Ref = {}; do
 
 	---@return MiruRect?
 	function Ref:rect()
-		local target = self.current
+		local target = ref_targets[self]
 		if not target then
 			return nil
 		end
-		local owner = self.owner
+		local owner = ref_owners[self]
+		if not owner then
+			return nil
+		end
 		if not owner.mounted then
 			return nil
 		end
@@ -402,6 +534,28 @@ local Ref = {}; do
 		return {
 			x = rect.x - base.x,
 			y = rect.y - base.y,
+			w = rect.w,
+			h = rect.h,
+		}
+	end
+
+	---@return MiruRect?
+	function Ref:window_rect()
+		local target = ref_targets[self]
+		if not target then
+			return nil
+		end
+		local owner = ref_owners[self]
+		if not owner or not owner.mounted then
+			return nil
+		end
+		local rect = rect_of(target)
+		if not rect then
+			return nil
+		end
+		return {
+			x = rect.x,
+			y = rect.y,
 			w = rect.w,
 			h = rect.h,
 		}
@@ -734,45 +888,78 @@ end
 local View = {}; do
 	View.__index = View
 
+	---@type fun(view: MiruView, cursor?: soluna.MouseCursor)
+	local set_mouse_cursor
+	---@type fun(view: MiruView, target: MiruComponent?)
+	local set_focused
+
+	---@param value MiruValue<boolean>?
+	---@param state boolean
+	local function set_state(value, state)
+		if value then
+			value(state)
+		end
+	end
+
+	---@param target MiruComponent?
+	---@param boundary MiruComponent
+	---@return boolean
+	local function target_inside(target, boundary)
+		while target do
+			if target == boundary then
+				return true
+			end
+			target = target.parent
+		end
+		return false
+	end
+
 	---@class (partial) MiruInstance
 	local Instance = {}; do
 		Instance.__index = Instance
 
 		---@return number, number
 		function Instance:origin()
+			return component_of(self):origin()
+		end
+
+		---@return MiruRect?
+		function Instance:rect()
+			local component = component_by_instance[self]
+			return component and rect_of(component) or nil
+		end
+
+		function Instance:destroy()
+			local component = component_by_instance[self]
+			if component then
+				component:destroy()
+			end
+		end
+	end
+
+	---@class (partial) MiruComponent
+	local Component = {}; do
+		Component.__index = Component
+
+		---@return number, number
+		function Component:origin()
 			local node = assert(self.render_node)
 			local x, y = yoga.node_get(node.node)
 			return x, y
 		end
 
 		---@return MiruRect?
-		function Instance:rect()
+		function Component:rect()
 			return rect_of(self)
 		end
 
-		---@param event table
-		---@return table
-		function Instance:local_event(event)
-			if event.x == nil or event.y == nil then
-				return event
-			end
-			local rect = assert(rect_of(self))
-			local out = {}
-			for key, value in pairs(event) do
-				out[key] = value
-			end
-			out.x = event.x - rect.x
-			out.y = event.y - rect.y
-			return out
-		end
-
 		---@param batch MiruBatch
-		function Instance:draw(batch)
+		function Component:draw(batch)
 			replay_commands(batch, self.commands)
 		end
 
 		---@param disposing_render_tree boolean?
-		function Instance:destroy(disposing_render_tree)
+		function Component:destroy(disposing_render_tree)
 			if not self.mounted then
 				return
 			end
@@ -782,22 +969,50 @@ local View = {}; do
 			if slot_name and view.slots[slot_name] == self then
 				view.slots[slot_name] = nil
 			end
-			local from_render_tree = disposing_render_tree == true
+			local from_render_tree = disposing_render_tree
 			local root = not from_render_tree and self.parent and root_instance(self) or nil
 			self.render_node = nil
-			if view.hovered_instance == self then
+			if target_inside(view.hovered_instance, self) then
+				for _, instance in ipairs(view.hovered_chain or {}) do
+					set_state(instance.hovered, false)
+				end
 				view.hovered_instance = nil
+				view.hovered_chain = nil
+			elseif view.hovered_chain then
+				for i = #view.hovered_chain, 1, -1 do
+					if view.hovered_chain[i] == self then
+						set_state(self.hovered, false)
+						table.remove(view.hovered_chain, i)
+						break
+					end
+				end
+			end
+			if view.clickable_hovered_instance == self then
+				view.clickable_hovered_instance = nil
+			end
+			if not view.hovered_instance and not view.clickable_hovered_instance then
+				set_mouse_cursor(view, nil)
 			end
 			if view.pressed_instance == self then
 				view.pressed_instance = nil
 				view.pressed_button = nil
 			end
+			if view.pressed_scrollable_instance == self then
+				view.pressed_scrollable_instance = nil
+				view.pressed_scrollable_button = nil
+			end
+			if view.focused_instance == self then
+				set_focused(view, nil)
+			end
 			unregister_dismissable(self)
 			self.mounted = nil
-			if self.ref and self.ref.current == self then
+			if self.ref and ref_targets[self.ref] == self then
+				ref_targets[self.ref] = nil
 				self.ref.current = nil
 			end
 			self.ref = nil
+			component_by_instance[self.public] = nil
+			component_by_args[self.public.args] = nil
 			if self.effect then
 				self.effect:stop()
 				self.effect = nil
@@ -848,32 +1063,36 @@ local View = {}; do
 
 	---@param holder table
 	---@param ref MiruRef?
-	---@param current any
+	---@param current MiruComponent|MiruRenderNode
 	local function bind_ref(holder, ref, current)
 		local old = holder.ref
-		if old ~= ref and old and old.current == current then
+		if old ~= ref and old and ref_targets[old] == current then
+			ref_targets[old] = nil
 			old.current = nil
 		end
 		holder.ref = ref
 		if ref then
-			ref.current = current
+			ref_targets[ref] = current
+			ref.current = public_target(current)
 		end
 	end
 
-	---@type fun(instance: MiruInstance, x: number, y: number, mode: MiruHitMode): MiruInstance?, number?, number?
+	---@type fun(component: MiruComponent, x: number, y: number, mode: MiruHitMode): MiruComponent?, number?, number?
 	local hit_instance
-	---@type fun(node: MiruRenderNode, x: number, y: number, mode: MiruHitMode): MiruInstance?, number?, number?
+	---@type fun(node: MiruRenderNode, x: number, y: number, mode: MiruHitMode): MiruComponent?, number?, number?
 	local hit_render_node
 
-	---@param value MiruValue<boolean>?
-	---@param state boolean
-	local function set_state(value, state)
-		if value then
-			value(state)
+	---@param view MiruView
+	---@param cursor? soluna.MouseCursor
+	function set_mouse_cursor(view, cursor)
+		if view.mouse_cursor == cursor then
+			return
 		end
+		view.mouse_cursor = cursor
+		soluna.set_mouse_cursor(cursor)
 	end
 
-	---@param instance MiruInstance
+	---@param instance MiruComponent
 	---@return boolean
 	local function clickable_enabled(instance)
 		local clickable = instance.clickable
@@ -881,37 +1100,89 @@ local View = {}; do
 			return false
 		end
 		local enabled = clickable.enabled
-		return enabled == nil or enabled ~= false
+		return not rawequal(enabled, false)
 	end
 
-	---@param instance MiruInstance
+	---@param instance MiruComponent
+	---@return boolean
+	local function focusable_enabled(instance)
+		local focusable = instance.focusable
+		if not focusable then
+			return false
+		end
+		local enabled = focusable.enabled
+		return not rawequal(enabled, false)
+	end
+
+	---@param instance MiruComponent
+	---@return boolean
+	local function scrollable_enabled(instance)
+		local scrollable = instance.scrollable
+		if not scrollable then
+			return false
+		end
+		local enabled = scrollable.enabled
+		return not rawequal(enabled, false)
+	end
+
+	---@param instance MiruComponent?
+	---@return soluna.MouseCursor?
+	local function clickable_cursor(instance)
+		local clickable = instance and instance.clickable or nil
+		if not clickable then
+			return nil
+		end
+		---@cast instance MiruComponent
+		if not clickable_enabled(instance) then
+			return DISABLED_CURSOR
+		end
+		local cursor = clickable.cursor
+		if cursor == DEFAULT_CURSOR then
+			return nil
+		end
+		return cursor or POINTER_CURSOR
+	end
+
+	---@param instance MiruComponent
 	---@param mode MiruHitMode
 	---@return boolean
 	local function instance_hittable(instance, mode)
-		return mode == "component" or clickable_enabled(instance)
+		if mode == "target" then
+			return instance.targetable and true or false
+		elseif mode == "clickable" then
+			return instance.clickable and true or false
+		elseif mode == "focusable" then
+			return instance.focusable and true or false
+		elseif mode == "scrollable" then
+			return instance.scrollable and true or false
+		end
+		return false
 	end
 
-	---@param target MiruInstance?
-	---@param current_target MiruInstance
+	---@param target MiruComponent?
+	---@param current_target MiruComponent
 	---@param x number
 	---@param y number
 	---@param button integer?
 	---@return MiruPointerEvent
-	local function pointer_event(target, current_target, x, y, button)
+	local function pointer_event(target, current_target, x, y, client_x, client_y, button)
+		local current_public = current_target.public
 		return {
-			target = target,
-			current_target = current_target,
-			instance = current_target,
+			target = target and target.public or nil,
+			current_target = current_public,
+			instance = current_public,
 			view = current_target.view,
 			x = x,
 			y = y,
+			client_x = client_x,
+			client_y = client_y,
 			local_x = x,
 			local_y = y,
 			button = button,
 		}
 	end
 
-	---@param instance MiruInstance
+	---@param instance MiruComponent
 	---@param name string
 	---@param event MiruPointerEvent
 	local function call_clickable(instance, name, event)
@@ -927,18 +1198,73 @@ local View = {}; do
 		end
 	end
 
-	---@param target MiruInstance?
-	---@param current_target MiruInstance
+	---@param instance MiruComponent
+	---@param name string
+	---@param event? table
+	local function call_focusable(instance, name, event)
+		local focusable = instance.focusable
+		if not focusable then
+			return
+		end
+		---@type fun(event?: table)?
+		---@diagnostic disable-next-line: undefined-field
+		local callback = focusable[name]
+		if callback then
+			callback(event)
+		end
+	end
+
+	---@param instance MiruComponent
+	---@param name string
+	---@param event MiruPointerEvent
+	local function call_scrollable(instance, name, event)
+		local scrollable = instance.scrollable
+		if not scrollable then
+			return
+		end
+		---@type fun(event: MiruPointerEvent)?
+		---@diagnostic disable-next-line: undefined-field
+		local callback = scrollable[name]
+		if callback then
+			callback(event)
+		end
+	end
+
+	---@param view MiruView
+	---@param target MiruComponent?
+	function set_focused(view, target)
+		if target and not focusable_enabled(target) then
+			target = nil
+		end
+		local old = view.focused_instance
+		if old == target then
+			return
+		end
+		if old then
+			set_state(old.focused, false)
+			if old.mounted then
+				call_focusable(old, "on_blur")
+			end
+		end
+		view.focused_instance = target
+		if target then
+			set_state(target.focused, true)
+			call_focusable(target, "on_focus")
+		end
+	end
+
+	---@param target MiruComponent?
+	---@param current_target MiruComponent
 	---@param x number
 	---@param y number
 	---@param button integer?
 	---@return MiruPointerEvent
 	local function pointer_event_at(target, current_target, x, y, button)
 		local ox, oy = current_target:origin()
-		return pointer_event(target, current_target, x - ox, y - oy, button)
+		return pointer_event(target, current_target, x - ox, y - oy, x, y, button)
 	end
 
-	---@param instance MiruInstance
+	---@param instance MiruComponent
 	---@return boolean
 	local function dismissable_enabled(instance)
 		local dismissable = instance.dismissable
@@ -946,24 +1272,11 @@ local View = {}; do
 			return false
 		end
 		local enabled = dismissable.enabled
-		return enabled == nil or enabled ~= false
+		return not rawequal(enabled, false)
 	end
 
-	---@param target MiruInstance?
-	---@param boundary MiruInstance
-	---@return boolean
-	local function target_inside(target, boundary)
-		while target do
-			if target == boundary then
-				return true
-			end
-			target = target.parent
-		end
-		return false
-	end
-
-	---@param instance MiruInstance
-	---@param target MiruInstance?
+	---@param instance MiruComponent
+	---@param target MiruComponent?
 	---@param x number
 	---@param y number
 	---@param button integer?
@@ -979,7 +1292,7 @@ local View = {}; do
 	end
 
 	---@param view MiruView
-	---@param target MiruInstance?
+	---@param target MiruComponent?
 	---@param x number
 	---@param y number
 	---@param button integer?
@@ -1007,7 +1320,7 @@ local View = {}; do
 				h = h,
 			}
 		end
-		---@cast target MiruInstance
+		---@cast target MiruComponent
 		local node = assert(target.render_node)
 		local x, y, w, h = yoga.node_get(node.node)
 		return {
@@ -1018,11 +1331,11 @@ local View = {}; do
 		}
 	end
 
-	---@param instance MiruInstance
+	---@param instance MiruComponent
 	---@param x number
 	---@param y number
 	---@param mode MiruHitMode
-	---@return MiruInstance?, number?, number?
+	---@return MiruComponent?, number?, number?
 	hit_instance = function(instance, x, y, mode)
 		if not instance.mounted then
 			return nil, nil, nil
@@ -1040,8 +1353,15 @@ local View = {}; do
 	---@param x number
 	---@param y number
 	---@param mode MiruHitMode
-	---@return MiruInstance?, number?, number?
+	---@return MiruComponent?, number?, number?
 	hit_render_node = function(node, x, y, mode)
+		local nx, ny, nw, nh = yoga.node_get(node.node)
+		local props = node.props
+		local clips_overflow = props and (props.overflow == "hidden" or props.overflow == "scroll")
+		local inside_clip = x >= nx and x <= nx + nw and y >= ny and y <= ny + nh
+		if clips_overflow and not inside_clip then
+			return nil, nil, nil
+		end
 		for i = #node.children, 1, -1 do
 			local child = node.children[i]
 			local target, tx, ty = hit_render_node(child, x, y, mode)
@@ -1050,12 +1370,11 @@ local View = {}; do
 			end
 		end
 		if node.kind == "component" and node.instance then
-			local cx, cy, cw, ch = yoga.node_get(node.node)
-			local lx = x - cx
-			local ly = y - cy
-			local instance = node.instance
-			if lx >= 0 and lx <= cw and ly >= 0 and ly <= ch and instance_hittable(instance, mode) then
-				return instance, lx, ly
+			local lx = x - nx
+			local ly = y - ny
+			local component = node.instance
+			if lx >= 0 and lx <= nw and ly >= 0 and ly <= nh and instance_hittable(component, mode) then
+				return component, lx, ly
 			end
 		end
 		return nil, nil, nil
@@ -1065,7 +1384,7 @@ local View = {}; do
 	---@param x number
 	---@param y number
 	---@param mode MiruHitMode
-	---@return MiruInstance?, number?, number?
+	---@return MiruComponent?, number?, number?
 	local function hit_view(view, x, y, mode)
 		for i = #view.instances, 1, -1 do
 			local target, tx, ty = hit_instance(view.instances[i], x, y, mode)
@@ -1079,37 +1398,52 @@ local View = {}; do
 	---@param view MiruView
 	---@param x number
 	---@param y number
-	---@return MiruInstance?, number?, number?
-	local function hit_clickable_view(view, x, y)
-		return hit_view(view, x, y, "clickable")
+	---@return MiruComponent?, number?, number?
+	local function hit_target_view(view, x, y)
+		return hit_view(view, x, y, "target")
 	end
 
 	---@param view MiruView
-	---@param x number
-	---@param y number
-	---@return MiruInstance?, number?, number?
-	local function hit_component_view(view, x, y)
-		return hit_view(view, x, y, "component")
-	end
-
-	---@param view MiruView
-	---@param target MiruInstance?
-	---@param x number?
-	---@param y number?
-	local function set_hovered(view, target, x, y)
+	---@param target MiruComponent?
+	local function set_hovered(view, target)
 		local old = view.hovered_instance
 		if old == target then
 			return
 		end
+		local next_chain = {}
+		local current = target
+		while current do
+			next_chain[#next_chain + 1] = current
+			current = current.parent
+		end
+		for _, instance in ipairs(view.hovered_chain or {}) do
+			if not target_inside(target, instance) then
+				set_state(instance.hovered, false)
+			end
+		end
+		view.hovered_instance = target
+		view.hovered_chain = next_chain
+		for _, instance in ipairs(next_chain) do
+			set_state(instance.hovered, true)
+		end
+	end
+
+	---@param view MiruView
+	---@param target MiruComponent?
+	---@param x number?
+	---@param y number?
+	local function set_clickable_hovered(view, target, x, y)
+		local old = view.clickable_hovered_instance
+		if old == target then
+			return
+		end
 		if old then
-			set_state(old.hovered, false)
 			if old.mounted then
 				call_clickable(old, "on_pointer_leave", pointer_event_at(old, old, x or 0, y or 0))
 			end
 		end
-		view.hovered_instance = target
+		view.clickable_hovered_instance = target
 		if target then
-			set_state(target.hovered, true)
 			call_clickable(target, "on_pointer_enter", pointer_event_at(target, target, x or 0, y or 0))
 		end
 	end
@@ -1133,6 +1467,7 @@ local View = {}; do
 		"wrap",
 		"display",
 		"position",
+		"overflow",
 		"top",
 		"bottom",
 		"left",
@@ -1152,7 +1487,7 @@ local View = {}; do
 		for i = 1, #layout_keys do
 			local key = layout_keys[i]
 			local value = props[key]
-			if value ~= nil then
+			if value then
 				style[key] = value
 			end
 		end
@@ -1249,13 +1584,13 @@ local View = {}; do
 		ctx.parent = prev
 	end
 
-	---@param instance MiruInstance
+	---@param component MiruComponent
 	---@param x number
 	---@param y number
 	---@param w number
 	---@param h number
-	local function set_instance_layout(instance, x, y, w, h)
-		local layout = instance.layout
+	local function set_instance_layout(component, x, y, w, h)
+		local layout = component.layout
 		if layout.x == x and layout.y == y and layout.w == w and layout.h == h then
 			return
 		end
@@ -1263,7 +1598,7 @@ local View = {}; do
 		layout.y = y
 		layout.w = w
 		layout.h = h
-		bump_version(instance.layout_version)
+		bump_version(component.layout_version)
 	end
 
 	---@param node MiruRenderNode
@@ -1294,43 +1629,315 @@ local View = {}; do
 		active_batch = prev
 	end
 
-	---@param node MiruRenderNode
-	---@return MiruTextEngine
-	local function text_engine(node)
-		local owner = assert(node.owner)
-		local engine = owner.view.provides.text_engine
-		assert(engine, "missing Miru text engine")
-		assert(type(engine.layout) == "function", "Miru text engine requires layout(args)")
-		return engine
+	---@type table<string, true?>
+	local TEXT_STYLE_RESERVED <const> = {
+		font = true,
+		default_font = true,
+		default = true,
+	}
+	local DEFAULT_TEXT_SIZE <const> = 16
+	local DEFAULT_TEXT_COLOR <const> = 0xff000000
+	local DEFAULT_TEXT_ALIGN <const> = "LT"
+
+	local TextLayout = {}
+	TextLayout.__index = TextLayout
+
+	local function text_style_tag(id)
+		if id == 0 then
+			return "[s]"
+		end
+		return "[s" .. tostring(id) .. "]"
 	end
 
-	---@param node MiruRenderNode
-	---@param width number
-	---@param height number
+	local function escape_text_chunk(text)
+		return tostring(text or ""):gsub("%[", "[[")
+	end
+
+	---@param styles MiruTextStyles
+	---@param align string
 	---@return table
-	local function text_layout_args(node, width, height)
-		local out = {}
-		local props = node.props
-		if props then
-			for key, value in pairs(props) do
-				out[key] = value
+	local function text_builder(styles, align)
+		local builders = styles.builders
+		local builder = builders[align]
+		if builder then
+			return builder
+		end
+		local block, layout = mattext.block(styles.styles, align)
+		builder = {
+			block = block,
+			layout = layout,
+		}
+		builders[align] = builder
+		return builder
+	end
+
+	local function text_style_id(styles, name)
+		name = name or styles.default
+		local id = styles.ids[name]
+		assert(id, "unknown Miru text style " .. tostring(name))
+		return id
+	end
+
+	local function text_style_key(base_id, style)
+		return table.concat({
+			base_id,
+			style.font or "",
+			style.size or "",
+			style.color or "",
+			style.line_height or "",
+		}, ":")
+	end
+
+	---@param styles MiruTextStyles
+	---@param props table
+	---@return MiruTextStyles, integer
+	local function text_node_styles(styles, props)
+		local base_id = text_style_id(styles, props.style)
+		if not (props.font or props.size or props.color or props.line_height) then
+			return styles, base_id
+		end
+
+		local base = assert(styles.specs[base_id + 1], "missing Miru base text style")
+		local style = {
+			font = props.font or base.font,
+			size = props.size or base.size,
+			color = props.color or base.color,
+			line_height = props.line_height or base.line_height,
+		}
+		local key = text_style_key(base_id, style)
+		local derived = styles.derived and styles.derived[key]
+		if derived then
+			return derived, #derived.specs - 1
+		end
+
+		local style_array = {}
+		for i = 1, #styles.specs do
+			style_array[i] = styles.specs[i]
+		end
+		style_array[#style_array + 1] = style
+		derived = {
+			font = styles.font,
+			styles = mattext.styles(styles.font, style_array),
+			specs = style_array,
+			ids = styles.ids,
+			default = styles.default,
+			builders = {},
+		}
+		local cache = styles.derived
+		if cache then
+			cache[key] = derived
+		end
+		return derived, #style_array - 1
+	end
+
+	local function append_style(chunks, current, id)
+		if current.value == id then
+			return
+		end
+		chunks[#chunks + 1] = text_style_tag(id)
+		current.value = id
+	end
+
+	local function append_named_string(chunks, styles, text, base_id, current)
+		text = tostring(text or "")
+		local position = 1
+		while true do
+			local open = text:find("%[", position)
+			if not open then
+				chunks[#chunks + 1] = escape_text_chunk(text:sub(position))
+				return
+			end
+			chunks[#chunks + 1] = escape_text_chunk(text:sub(position, open - 1))
+			local next_char = text:sub(open + 1, open + 1)
+			if next_char == "[" then
+				chunks[#chunks + 1] = "[["
+				position = open + 2
+			else
+				local close = text:find("%]", open + 1)
+				if close then
+					local name = text:sub(open + 1, close - 1)
+					if name == "n" then
+						append_style(chunks, current, base_id)
+					else
+						local id = styles.ids[name]
+						if id then
+							append_style(chunks, current, id)
+						else
+							chunks[#chunks + 1] = "[[" .. name .. "]"
+						end
+					end
+					position = close + 1
+				else
+					chunks[#chunks + 1] = "[["
+					position = open + 1
+				end
 			end
 		end
-		out.text = node.text
-		out.width = max(1, pixel_size(width))
-		out.height = pixel_size(height)
-		return out
+	end
+
+	local function compile_text(text, styles, base_id)
+		local chunks = {}
+		local current = {
+			value = 0,
+		}
+		append_style(chunks, current, base_id)
+		append_named_string(chunks, styles, text, base_id, current)
+		return table.concat(chunks)
+	end
+
+	local function text_alignment(value)
+		local align = tostring(value or DEFAULT_TEXT_ALIGN):upper()
+		local horizontal = "L"
+		local vertical = "T"
+		for i = 1, #align do
+			local c = align:sub(i, i)
+			if c == "C" or c == "R" then
+				horizontal = c
+			elseif c == "V" or c == "B" then
+				vertical = c
+			end
+		end
+		return horizontal .. "T", vertical
+	end
+
+	local function text_vertical_offset(vertical, content_height, viewport_height)
+		if not viewport_height or viewport_height <= content_height then
+			return 0
+		end
+		if vertical == "V" then
+			return floor((viewport_height - content_height) / 2)
+		elseif vertical == "B" then
+			return viewport_height - content_height
+		end
+		return 0
+	end
+
+	function TextLayout:draw(batch, x, y, width, height)
+		x = x or 0
+		y = y or 0
+		local scroll_y = pixel_size(self.scroll_y)
+		local viewport_width = width and pixel_size(width) or nil
+		local viewport_height = height and pixel_size(height) or nil
+		local offset_y = scroll_y == 0 and text_vertical_offset(self.vertical_align, self.height, viewport_height) or 0
+		if scroll_y > 0
+			or (viewport_width and viewport_width < self.width)
+			or (viewport_height and viewport_height < self.height)
+		then
+			if viewport_width and viewport_width > 0 and viewport_height and viewport_height > 0 then
+				batch:add(matclip.rect(viewport_width, viewport_height), x, y)
+				batch:add(self.stream, x, y + offset_y - scroll_y)
+				batch:add(matclip.rect())
+			end
+			return
+		end
+		batch:add(self.stream, x, y + offset_y)
+	end
+
+	---@param spec MiruTextStyleRegistry
+	---@return MiruTextStyles
+	function build_text_styles(spec)
+		assert(type(spec) == "table", "Miru text_styles requires a table")
+		local fontcobj = assert(spec.font, "Miru text_styles requires .font")
+		local default_font = assert(spec.default_font, "Miru text_styles requires .default_font")
+		local default_name = spec.default or "body"
+		local names = {}
+		for name, value in pairs(spec) do
+			if not TEXT_STYLE_RESERVED[name] and type(value) == "table" and name ~= default_name then
+				names[#names + 1] = name
+			end
+		end
+		table.sort(names)
+		table.insert(names, 1, default_name)
+
+		---@type table<string, table?>
+		local resolved = {}
+		---@type table<string, true?>
+		local resolving = {}
+		local function resolve(name)
+			local style = resolved[name]
+			if style then
+				return style
+			end
+			assert(not resolving[name], "cyclic Miru text style " .. tostring(name))
+			local source = assert(spec[name], "missing Miru text style " .. tostring(name))
+			resolving[name] = true
+			local parent
+			if source.based_on then
+				parent = resolve(source.based_on)
+			elseif name ~= default_name then
+				parent = resolve(default_name)
+			end
+			style = {
+				font = source.font or parent and parent.font or default_font,
+				size = source.size or parent and parent.size or DEFAULT_TEXT_SIZE,
+				color = source.color or parent and parent.color or DEFAULT_TEXT_COLOR,
+				line_height = source.line_height or parent and parent.line_height,
+			}
+			resolving[name] = nil
+			resolved[name] = style
+			return style
+		end
+
+		local ids = {}
+		local style_array = {}
+		for i = 1, #names do
+			local name = names[i]
+			local style = resolve(name)
+			ids[name] = i - 1
+			style_array[i] = style
+		end
+		return {
+			font = fontcobj,
+			styles = mattext.styles(fontcobj, style_array),
+			specs = style_array,
+			ids = ids,
+			default = default_name,
+			builders = {},
+			derived = {},
+		}
+	end
+
+	---@param node MiruRenderNode
+	---@return MiruTextStyles
+	local function text_styles(node)
+		local owner = assert(node.owner)
+		local registry = owner.view.text_style_registry
+		assert(registry, "missing Miru text styles")
+		return registry
 	end
 
 	---@param node MiruRenderNode
 	---@param width number
-	---@param height number
+	---@param _height number
 	---@return MiruTextLayout
-	local function build_text_layout(node, width, height)
-		local layout = assert(text_engine(node).layout(text_layout_args(node, width, height)),
-			"Miru text engine layout must return a layout")
-		assert(type(layout.height) == "number", "Miru text layout requires numeric height")
+	local function build_text_layout(node, width, _height)
+		local styles = text_styles(node)
+		local props = node.props or {}
+		local align, vertical_align = text_alignment(props.align)
+		local base_id
+		styles, base_id = text_node_styles(styles, props)
+		local builder = text_builder(styles, align)
+		local w = max(1, pixel_size(width))
+		local layout_width = w
+		if props.wrap == false then
+			layout_width = max(layout_width, TEXT_NOWRAP_WIDTH)
+		end
+		local text = compile_text(node.text, styles, base_id)
+		local stream = builder.block(text, layout_width)
+		local query = builder.layout(text, layout_width)
+		---@type MiruTextLayout
+		local layout = setmetatable({
+			stream = stream,
+			query = query,
+			width = layout_width,
+			height = query:height(),
+			line_height = query:line_height(),
+			line_count = query:line_count(),
+			scroll_y = props.scroll_y,
+			vertical_align = vertical_align,
+		}, TextLayout)
 		node.text_layout = layout
+		node.text_metrics = layout
 		return layout
 	end
 
@@ -1338,12 +1945,12 @@ local View = {}; do
 	---@return boolean
 	local function resolve_text_layout(node)
 		local _, _, width, height = yoga.node_get(node.node)
-		local layout = build_text_layout(node, width, height)
+		build_text_layout(node, width, height)
 		local props = node.props
-		if props and props.height ~= nil then
+		if props and props.height then
 			return false
 		end
-		local measured_height = max(0, pixel_size(layout.height))
+		local measured_height = max(0, pixel_size(assert(node.text_metrics).height))
 		if pixel_size(height) == measured_height then
 			return false
 		end
@@ -1399,13 +2006,7 @@ local View = {}; do
 			name = "text",
 			args = {},
 			draw = function(batch)
-				local engine = text_engine(node)
-				if engine.draw then
-					engine.draw(batch, layout, 0, 0, pixel_size(width), pixel_size(height))
-					return
-				end
-				local draw = assert(layout.draw, "Miru text layout requires draw(batch, x, y) or engine.draw")
-				draw(layout, batch, 0, 0)
+				layout:draw(batch, 0, 0, pixel_size(width), pixel_size(height))
 			end,
 		}
 	end
@@ -1440,11 +2041,19 @@ local View = {}; do
 		else
 			out[#out + 1] = command("layer", draw_x, draw_y)
 		end
-		if props and props.background ~= nil then
+		if props and props.background then
 			local bg = background_command(props.background, w, h)
 			if bg then
 				out[#out + 1] = bg
 			end
+		end
+		local clips_overflow = props
+			and (props.overflow == "hidden" or props.overflow == "scroll")
+			and w > 0
+			and h > 0
+			and (node.kind == "text" or node.kind == "canvas" or #node.children > 0)
+		if clips_overflow then
+			out[#out + 1] = command("add", matclip.rect(w, h), 0, 0)
 		end
 		if node.kind == "text" then
 			out[#out + 1] = text_command(node, w, h)
@@ -1472,20 +2081,23 @@ local View = {}; do
 		for i = 1, #node.children do
 			compile_render_node(node.children[i], out, x, y)
 		end
+		if clips_overflow then
+			out[#out + 1] = command("add", matclip.rect())
+		end
 		out[#out + 1] = command "layer"
 	end
 
-	---@param instance MiruInstance
+	---@param component MiruComponent
 	---@return MiruCommand[]
-	function compile_render_tree(instance)
-		local root = assert(instance.render_node)
+	function compile_render_tree(component)
+		local root = assert(component.render_node)
 		if not root.parent then
 			local style = layout_style(root.props)
-			if style.width == nil then
-				style.width = instance.view.w
+			if not style.width then
+				style.width = component.view.w
 			end
-			if style.height == nil then
-				style.height = instance.view.h
+			if not style.height then
+				style.height = component.view.h
 			end
 			yoga.node_set(root.node, style)
 		end
@@ -1498,8 +2110,8 @@ local View = {}; do
 		local prev = active
 		if not prev then
 			active = {
-				view = instance.view,
-				instance = instance,
+				view = component.view,
+				instance = component,
 				drawing = true,
 			}
 		end
@@ -1533,7 +2145,7 @@ local View = {}; do
 	end
 
 	---@param view MiruView
-	---@param root MiruInstance
+	---@param root MiruComponent
 	function schedule_render_tree_compile(view, root)
 		if not root.mounted then
 			return
@@ -1559,89 +2171,109 @@ local View = {}; do
 		}
 	end
 
-	---@param instance MiruInstance
+	---@param component MiruComponent
 	---@param key string
 	---@param value any
-	local function set_prop(instance, key, value)
-		local props = instance.props
+	local function set_prop(component, key, value)
+		local props = component.props
 		if props[key] == value then
 			return
 		end
 		props[key] = value
-		local clickable_bindings = instance.clickable_prop_bindings
-		if clickable_bindings then
-			local field = clickable_bindings[key]
-			if field and instance.clickable then
-				instance.clickable[field] = value
+		local prop_bindings = component.prop_bindings
+		if prop_bindings then
+			for i = 1, #prop_bindings do
+				local binding = prop_bindings[i]
+				local field = rawget(binding.fields, key)
+				if field then
+					binding.target[field] = value
+				end
 			end
 		end
-		instance.view.scope:trigger(props, key)
+		component.view.scope:trigger(props, key)
 	end
 
-	---@param instance MiruInstance
+	---@param component MiruComponent
 	---@param props table?
-	function patch_props(instance, props)
+	function patch_props(component, props)
 		props = props or {}
-		for key in pairs(instance.props) do
-			if props[key] == nil then
-				set_prop(instance, key, nil)
+		for key in pairs(component.props) do
+			local value = props[key]
+			if not value and not rawequal(value, false) then
+				set_prop(component, key, nil)
 			end
 		end
 		for key, value in pairs(props) do
-			set_prop(instance, key, value)
+			set_prop(component, key, value)
 		end
 	end
 
-	---@param instance MiruInstance
+	local args_metatable <const> = {
+		__index = function(args, key)
+			local component = component_by_args[args]
+			assert(component, "stale Miru args")
+			local props = component.props
+			local context = active
+			if context and context.instance == component and context.setup_prop_reads then
+				context.setup_prop_reads[key] = true
+			else
+				component.view.scope:track(props, key)
+			end
+			return props[key]
+		end,
+		__newindex = function(args, key, value)
+			local component = component_by_args[args]
+			assert(component, "stale Miru args")
+			set_prop(component, key, value)
+		end,
+		__pairs = function(args)
+			local component = component_by_args[args]
+			assert(component, "stale Miru args")
+			return next, component.props
+		end,
+	}
+
+	---@param component MiruComponent
 	---@return table
-	local function component_args(instance)
-		return setmetatable({}, {
-			__index = function(_, key)
-				local props = instance.props
-				local context = active
-				if context and context.instance == instance and context.setup_prop_reads then
-					context.setup_prop_reads[key] = true
-				else
-					instance.view.scope:track(props, key)
-				end
-				return props[key]
-			end,
-			__newindex = function(_, key, value)
-				set_prop(instance, key, value)
-			end,
-			__pairs = function()
-				return next, instance.props
-			end,
-		})
+	local function component_args(component)
+		local args = setmetatable({}, args_metatable)
+		component_by_args[args] = component
+		return args
 	end
 
-	---@param instance MiruInstance
-	---@return MiruInstance
-	function root_instance(instance)
-		while instance.parent do
-			instance = instance.parent
+	---@param component MiruComponent
+	---@return MiruComponent
+	function root_instance(component)
+		while component.parent do
+			component = component.parent
 		end
-		return instance
+		return component
 	end
 
 	---@param view MiruView
 	---@param chunk string
 	---@param props table?
-	---@param parent MiruInstance?
+	---@param parent MiruComponent?
 	---@param render_node MiruRenderNode
-	---@return MiruInstance
+	---@return MiruComponent
 	function mount_component(view, chunk, props, parent, render_node)
 		local path = assert(file.searchpath(chunk, view.provides.component_path))
-		local source = assert(file.load(path))
-		---@diagnostic disable-next-line: assign-type-mismatch
-		chunk = assert(load(source, "@" .. path, "t"))
-		assert(type(chunk) == "function")
+		local factory = components[path]
+		if not factory then
+			local source = assert(file.load(path))
+			---@diagnostic disable-next-line: assign-type-mismatch
+			factory = assert(load(source, "@" .. path, "t"))
+			assert(type(factory) == "function")
+			components[path] = factory
+		end
 
 		local order = view.effect_order + 1
 		view.effect_order = order
 
-		---@type MiruInstance
-		local instance = setmetatable({
+		local public = setmetatable({}, Instance)
+		---@type MiruComponent
+		local component = setmetatable({
+			public = public,
 			view = view,
 			parent = parent,
 			children = {},
@@ -1651,53 +2283,53 @@ local View = {}; do
 			layout_version = view.scope:value(0),
 			props = {},
 			render_node = render_node,
-		}, Instance)
-		render_node.instance = instance
-		local args = component_args(instance)
-		instance.args = args
-		patch_props(instance, props)
-		render_node.props = instance.props
-		bind_ref(instance, props and props.ref, instance)
+		}, Component)
+		component_by_instance[public] = component
+		render_node.instance = component
+		public.args = component_args(component)
+		patch_props(component, props)
+		render_node.props = component.props
+		bind_ref(component, props and props.ref, component)
 
 		local prev = active
 		local prev_effect = view.scope.active
 		---@type MiruContext
 		active = {
 			view = view,
-			instance = instance,
-			disposables = instance.disposables,
+			instance = component,
+			disposables = component.disposables,
 			setup_prop_reads = {},
 		}
 		view.scope.active = nil
-		local draw = chunk(args)
+		local draw = factory(public.args)
 		view.scope.active = prev_effect
 		active = prev
 		assert(type(draw) == "function")
 		local ctx
 
-		instance.effect = view.scope:effect(function()
-			if not instance.mounted then
+		component.effect = view.scope:effect(function()
+			if not component.mounted then
 				return
 			end
-			local nested_render = active_render ~= nil
-			if not instance.parent then
+			local nested_render = active_render
+			if not component.parent then
 				view.layout_version()
 			end
-			instance.layout_version()
+			component.layout_version()
 			---@diagnostic disable-next-line: redefined-local
 			local prev = active
 			local prev_render = active_render
 			---@type MiruContext
 			ctx = ctx or {
 				view = view,
-				instance = instance,
+				instance = component,
 				drawing = true,
 				rendering = true,
 			}
-			local parent_node = assert(instance.render_node)
+			local parent_node = assert(component.render_node)
 			local render_ctx = {
 				view = view,
-				instance = instance,
+				instance = component,
 				parent = parent_node,
 			}
 			active = ctx
@@ -1707,13 +2339,13 @@ local View = {}; do
 			draw()
 			remove_render_children_from(render_ctx.parent, render_ctx.parent.cursor)
 			if not nested_render then
-				schedule_render_tree_compile(view, root_instance(instance))
+				schedule_render_tree_compile(view, root_instance(component))
 			end
 			active = prev
 			active_render = prev_render
 		end, order)
 
-		return instance
+		return component
 	end
 
 	---@param chunk string
@@ -1721,7 +2353,8 @@ local View = {}; do
 	---@param parent MiruInstance?
 	---@return MiruInstance
 	function View:mount(chunk, props, parent)
-		local parent_node = parent and assert(parent.render_node) or nil
+		local parent_component = parent and component_of(parent) or nil
+		local parent_node = parent_component and assert(parent_component.render_node) or nil
 		local style = layout_style(props)
 		local node = {
 			kind = "component",
@@ -1729,25 +2362,25 @@ local View = {}; do
 			chunk = chunk,
 			node = yoga.node_new(parent_node and parent_node.node),
 			parent = parent_node,
-			owner = parent,
+			owner = parent_component,
 			children = {},
 			cursor = 1,
 			props = props,
 		}
 		yoga.node_set(node.node, style)
-		local instance = mount_component(self, chunk, props, parent, node)
+		local component = mount_component(self, chunk, props, parent_component, node)
 		if parent_node then
-			local parent_instance = assert(parent)
+			---@cast parent_component MiruComponent
 			parent_node.children[#parent_node.children + 1] = node
-			parent_instance.children[#parent_instance.children + 1] = instance
-			local root = root_instance(parent_instance)
+			parent_component.children[#parent_component.children + 1] = component
+			local root = root_instance(parent_component)
 			if root.mounted then
 				schedule_render_tree_compile(self, root)
 			end
 		else
-			self.instances[#self.instances + 1] = instance
+			self.instances[#self.instances + 1] = component
 		end
-		return instance
+		return component.public
 	end
 
 	---@param props table?
@@ -1818,12 +2451,12 @@ local View = {}; do
 		else
 			patch_props(assert(node.instance), props)
 		end
-		local instance = assert(node.instance)
-		instance.render_node = node
-		node.props = instance.props
-		bind_ref(instance, props and props.ref, instance)
+		local component = assert(node.instance)
+		component.render_node = node
+		node.props = component.props
+		bind_ref(component, props and props.ref, component)
 		yoga.node_set(node.node, layout_style(props))
-		return instance
+		return component.public
 	end
 
 	---@param name string
@@ -1842,8 +2475,12 @@ local View = {}; do
 			node = nil
 		end
 		if not node then
-			---@type MiruInstance
-			local instance = setmetatable({
+			local public = setmetatable({
+				args = {},
+			}, Instance)
+			---@type MiruComponent
+			local component = setmetatable({
+				public = public,
 				view = self,
 				parent = ctx.instance,
 				children = {},
@@ -1852,9 +2489,9 @@ local View = {}; do
 				mounted = true,
 				layout_version = self.scope:value(0),
 				props = {},
-				args = {},
 				slot_name = name,
-			}, Instance)
+			}, Component)
+			component_by_instance[public] = component
 			node = {
 				kind = "slot",
 				key = name,
@@ -1863,18 +2500,18 @@ local View = {}; do
 				owner = ctx.instance,
 				children = {},
 				cursor = 1,
-				instance = instance,
+				instance = component,
 			}
-			instance.render_node = node
+			component.render_node = node
 			parent.children[index] = node
-			self.slots[name] = instance
+			self.slots[name] = component
 		end
-		local instance = assert(node.instance)
-		instance.render_node = node
-		self.slots[name] = instance
-		bind_ref(instance, props and props.ref, instance)
+		local component = assert(node.instance)
+		component.render_node = node
+		self.slots[name] = component
+		bind_ref(component, props and props.ref, component)
 		yoga.node_set(node.node, layout_style(props))
-		return instance
+		return component.public
 	end
 
 	---@param animation MiruAnimation
@@ -1920,7 +2557,7 @@ local View = {}; do
 		self.w = w
 		self.h = h
 		bump_version(self.layout_version)
-		if self.pointer_x ~= nil and self.pointer_y ~= nil then
+		if self.pointer_x and self.pointer_y then
 			self:pointer(self.pointer_x, self.pointer_y)
 		end
 	end
@@ -1930,10 +2567,26 @@ local View = {}; do
 	function View:pointer(x, y)
 		self.pointer_x = x
 		self.pointer_y = y
-		local target, tx, ty = hit_clickable_view(self, x, y)
-		set_hovered(self, target, x, y)
-		if target then
-			call_clickable(target, "on_pointer_move", pointer_event(target, target, tx or 0, ty or 0))
+		local target, tx, ty = hit_view(self, x, y, "clickable")
+		local hover_target = hit_target_view(self, x, y)
+		local active_target = target and clickable_enabled(target) and target or nil
+		set_hovered(self, hover_target)
+		set_clickable_hovered(self, active_target, x, y)
+		set_mouse_cursor(self, clickable_cursor(target))
+		if active_target then
+			call_clickable(active_target, "on_pointer_move",
+				pointer_event(active_target, active_target, tx or 0, ty or 0, x, y))
+		end
+		local pressed_scrollable = self.pressed_scrollable_instance
+		if pressed_scrollable and pressed_scrollable.mounted then
+			call_scrollable(pressed_scrollable, "on_pointer_move",
+				pointer_event_at(pressed_scrollable, pressed_scrollable, x, y))
+		else
+			local scrollable, sx, sy = hit_view(self, x, y, "scrollable")
+			if scrollable and scrollable_enabled(scrollable) then
+				call_scrollable(scrollable, "on_pointer_move",
+					pointer_event(scrollable, scrollable, sx or 0, sy or 0, x, y))
+			end
 		end
 	end
 
@@ -1943,16 +2596,16 @@ local View = {}; do
 	function View:click(x, y)
 		x = x or self.pointer_x
 		y = y or self.pointer_y
-		if x == nil or y == nil then
+		if not x or not y then
 			return
 		end
-		local event_target = hit_component_view(self, x, y)
-		local target, tx, ty = hit_clickable_view(self, x, y)
+		local event_target = hit_target_view(self, x, y)
+		local target, tx, ty = hit_view(self, x, y, "clickable")
 		notify_dismissable(self, event_target, x, y)
-		if target then
-			call_clickable(target, "on_click", pointer_event(event_target, target, tx or 0, ty or 0))
+		if target and clickable_enabled(target) then
+			call_clickable(target, "on_click", pointer_event(event_target, target, tx or 0, ty or 0, x, y))
+			return target.public
 		end
-		return target
 	end
 
 	---@param button integer
@@ -1960,40 +2613,98 @@ local View = {}; do
 	function View:mouse_button(button, state)
 		local x = self.pointer_x
 		local y = self.pointer_y
-		if x == nil or y == nil then
+		if not x or not y then
 			return
 		end
-		local event_target = hit_component_view(self, x, y)
-		local target, tx, ty = hit_clickable_view(self, x, y)
+		local event_target = hit_target_view(self, x, y)
+		local target, tx, ty = hit_view(self, x, y, "clickable")
+		local focus_target = hit_view(self, x, y, "focusable")
+		local scroll_target, sx, sy = hit_view(self, x, y, "scrollable")
+		local active_target = target and clickable_enabled(target) and target or nil
+		local active_scroll_target = scroll_target and scrollable_enabled(scroll_target) and scroll_target or nil
 		if state == 1 then
 			notify_dismissable(self, event_target, x, y, button)
+			set_focused(self, focus_target)
 			local old = self.pressed_instance
-			if old and old ~= target then
+			if old and old ~= active_target then
 				set_state(old.pressed, false)
 			end
-			self.pressed_instance = target
-			self.pressed_button = target and button or nil
-			if target then
-				set_state(target.pressed, true)
-				call_clickable(target, "on_pointer_down", pointer_event(event_target, target, tx or 0, ty or 0, button))
+			self.pressed_instance = active_target
+			self.pressed_button = active_target and button or nil
+			if active_target then
+				set_state(active_target.pressed, true)
+				call_clickable(active_target, "on_pointer_down",
+					pointer_event(event_target, active_target, tx or 0, ty or 0, x, y, button))
+			end
+			self.pressed_scrollable_instance = active_scroll_target
+			self.pressed_scrollable_button = active_scroll_target and button or nil
+			if active_scroll_target then
+				call_scrollable(active_scroll_target, "on_pointer_down",
+					pointer_event(event_target, active_scroll_target, sx or 0, sy or 0, x, y, button))
 			end
 			return
 		end
 
 		local pressed = self.pressed_instance
 		local pressed_button = self.pressed_button
+		local pressed_scrollable = self.pressed_scrollable_instance
+		local pressed_scrollable_button = self.pressed_scrollable_button
 		self.pressed_instance = nil
 		self.pressed_button = nil
-		if not pressed then
+		self.pressed_scrollable_instance = nil
+		self.pressed_scrollable_button = nil
+		if pressed and pressed.mounted then
+			set_state(pressed.pressed, false)
+			call_clickable(pressed, "on_pointer_up", pointer_event_at(pressed, pressed, x, y, button))
+			if pressed == active_target and pressed_button == button then
+				call_clickable(pressed, "on_click", pointer_event(event_target, pressed, tx or 0, ty or 0, x, y, button))
+			end
+		end
+		if pressed_scrollable and pressed_scrollable.mounted and pressed_scrollable_button == button then
+			call_scrollable(pressed_scrollable, "on_pointer_up",
+				pointer_event_at(pressed_scrollable, pressed_scrollable, x, y, button))
+		end
+	end
+
+	---@param event table
+	function View:mouse_scroll(event)
+		local x = self.pointer_x
+		local y = self.pointer_y
+		if not x or not y then
 			return
 		end
-		if not pressed.mounted then
+		local event_target = hit_target_view(self, x, y)
+		local target, tx, ty = hit_view(self, x, y, "scrollable")
+		if not target or not scrollable_enabled(target) then
 			return
 		end
-		set_state(pressed.pressed, false)
-		call_clickable(pressed, "on_pointer_up", pointer_event_at(pressed, pressed, x, y, button))
-		if pressed == target and pressed_button == button and clickable_enabled(pressed) then
-			call_clickable(pressed, "on_click", pointer_event(event_target, pressed, tx or 0, ty or 0, button))
+		local out = pointer_event(event_target, target, tx or 0, ty or 0, x, y)
+		out.scroll_x = event.scroll_x or event.x or 0
+		out.scroll_y = event.scroll_y or event.y or 0
+		call_scrollable(target, "on_scroll", out)
+	end
+
+	---@param event table
+	function View:char(event)
+		local target = self.focused_instance
+		if target and target.mounted and focusable_enabled(target) then
+			call_focusable(target, "on_char", event)
+		end
+	end
+
+	---@param event table
+	function View:key(event)
+		local target = self.focused_instance
+		if target and target.mounted and focusable_enabled(target) then
+			call_focusable(target, "on_key", event)
+		end
+	end
+
+	---@param event table
+	function View:clipboard_pasted(event)
+		local target = self.focused_instance
+		if target and target.mounted and focusable_enabled(target) then
+			call_focusable(target, "on_clipboard_pasted", event)
 		end
 	end
 
@@ -2016,10 +2727,16 @@ local View = {}; do
 		self.scope:trigger(self.provides, name)
 	end
 
+	---@param spec MiruTextStyleRegistry
+	function View:text_styles(spec)
+		self.text_style_registry = build_text_styles(spec)
+		bump_version(self.layout_version)
+	end
+
 	---@param name string
 	---@return MiruInstance
 	function View:slot(name)
-		return assert(self.slots[name])
+		return assert(self.slots[name]).public
 	end
 end
 
@@ -2042,8 +2759,8 @@ function M.new(args)
 	local provides = {
 		component_path = args.component_path or COMPONENT_PATH,
 	}
-	if args.text_engine ~= nil then
-		provides.text_engine = args.text_engine
+	for key, value in pairs(args.provides or {}) do
+		provides[key] = value
 	end
 	---@type MiruView
 	local view = setmetatable({
@@ -2103,6 +2820,12 @@ function M.use(name)
 	return use_provide(name)
 end
 
+---@param spec MiruTextStyleRegistry
+function M.text_styles(spec)
+	local context = assert(active, "text_styles requires an active Miru context")
+	context.view:text_styles(spec)
+end
+
 ---@param fn MiruAnimatedTarget
 ---@param opts table?
 ---@return MiruAnimation
@@ -2150,6 +2873,7 @@ end
 
 local clickable_prop_keys <const> = {
 	enabled = true,
+	cursor = true,
 	on_click = true,
 	on_pointer_down = true,
 	on_pointer_up = true,
@@ -2158,96 +2882,166 @@ local clickable_prop_keys <const> = {
 	on_pointer_move = true,
 }
 
----@param instance MiruInstance
+local focusable_prop_keys <const> = {
+	enabled = true,
+	on_focus = true,
+	on_blur = true,
+	on_char = true,
+	on_key = true,
+	on_clipboard_pasted = true,
+}
+
+local scrollable_prop_keys <const> = {
+	enabled = true,
+	on_scroll = true,
+	on_pointer_down = true,
+	on_pointer_up = true,
+	on_pointer_move = true,
+}
+
+---@param component MiruComponent
+local function mark_targetable(component)
+	component.targetable = true
+end
+
+---@param component MiruComponent
+---@param target table
 ---@param props table?
 ---@param prop_keys table<any, boolean>
----@return table<any, string>?
-local function setup_prop_bindings(instance, props, prop_keys)
+local function register_prop_bindings(component, target, props, prop_keys)
 	if not props then
-		return nil
+		return
 	end
 	local context = active
-	local reads = context and context.instance == instance and context.setup_prop_reads or nil
+	local reads = context and context.instance == component and context.setup_prop_reads or nil
 	if not reads then
-		return nil
+		return
 	end
-	local bindings
+	local fields
 	for key in pairs(reads) do
 		local value = props[key]
-		if prop_keys[key] and value == instance.props[key] then
-			bindings = bindings or {}
-			bindings[key] = key
+		if prop_keys[key] and value == component.props[key] then
+			fields = fields or {}
+			fields[key] = key
 		end
 	end
-	return bindings
+	if not fields then
+		return
+	end
+	local prop_bindings = component.prop_bindings
+	if not prop_bindings then
+		prop_bindings = {}
+		component.prop_bindings = prop_bindings
+	end
+	prop_bindings[#prop_bindings + 1] = {
+		target = target,
+		fields = fields,
+	}
 end
 
 ---@param props MiruClickable?
 function M.clickable(props)
 	---@cast active MiruContext
-	local instance = assert(active.instance)
-	instance.clickable = props or {}
-	instance.clickable_prop_bindings = setup_prop_bindings(instance, props, clickable_prop_keys)
+	local component = assert(active.instance)
+	mark_targetable(component)
+	local clickable = props or {}
+	component.clickable = clickable
+	register_prop_bindings(component, clickable, props, clickable_prop_keys)
+end
+
+---@param props MiruFocusable?
+function M.focusable(props)
+	---@cast active MiruContext
+	local component = assert(active.instance)
+	mark_targetable(component)
+	local focusable = props or {}
+	component.focusable = focusable
+	register_prop_bindings(component, focusable, props, focusable_prop_keys)
+end
+
+---@param props MiruScrollable?
+function M.scrollable(props)
+	---@cast active MiruContext
+	local component = assert(active.instance)
+	mark_targetable(component)
+	local scrollable = props or {}
+	component.scrollable = scrollable
+	register_prop_bindings(component, scrollable, props, scrollable_prop_keys)
 end
 
 ---@param props MiruDismissable?
 function M.dismissable(props)
 	---@cast active MiruContext
-	local instance = assert(active.instance)
+	local component = assert(active.instance)
 	if props then
-		instance.dismissable = props
-		register_dismissable(active.view, instance)
+		mark_targetable(component)
+		component.dismissable = props
+		register_dismissable(active.view, component)
 	else
-		unregister_dismissable(instance)
-		instance.dismissable = nil
+		unregister_dismissable(component)
+		component.dismissable = nil
 	end
 end
 
 ---@return MiruValue<boolean>
 function M.hovered()
 	---@cast active MiruContext
-	local instance = assert(active.instance)
-	local hovered = instance.hovered
+	local component = assert(active.instance)
+	mark_targetable(component)
+	local hovered = component.hovered
 	if hovered then
 		return hovered
 	end
 	hovered = active.view.scope:value(false)
-	instance.hovered = hovered
+	component.hovered = hovered
 	return hovered
 end
 
 ---@return MiruValue<boolean>
 function M.pressed()
 	---@cast active MiruContext
-	local instance = assert(active.instance)
-	local pressed = instance.pressed
+	local component = assert(active.instance)
+	local pressed = component.pressed
 	if pressed then
 		return pressed
 	end
 	pressed = active.view.scope:value(false)
-	instance.pressed = pressed
+	component.pressed = pressed
 	return pressed
+end
+
+---@return MiruValue<boolean>
+function M.focused()
+	---@cast active MiruContext
+	local component = assert(active.instance)
+	local focused = component.focused
+	if focused then
+		return focused
+	end
+	focused = active.view.scope:value(false)
+	component.focused = focused
+	return focused
 end
 
 ---@return MiruRef
 function M.ref()
 	local context = assert(active)
-	return setmetatable({
-		owner = assert(context.instance),
-	}, Ref)
+	local ref = setmetatable({}, Ref)
+	ref_owners[ref] = assert(context.instance)
+	return ref
 end
 
-	---@param methods table
-	function M.expose(methods)
-		---@cast active MiruContext
-		local instance = assert(active.instance)
-		for key, value in pairs(methods) do
-			assert(instance[key] == nil)
-			instance[key] = function(_, ...args)
-				return value(table.unpack(args, 1, args.n))
-			end
+---@param methods table
+function M.expose(methods)
+	---@cast active MiruContext
+	local public = assert(active.instance).public
+	for key, value in pairs(methods) do
+		assert(not public[key])
+		public[key] = function(_, ...args)
+			return value(table.unpack(args, 1, args.n))
 		end
 	end
+end
 
 ---@param chunk string
 ---@param props table?

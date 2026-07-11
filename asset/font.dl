@@ -1,9 +1,0 @@
-fonts :
-	macos :
-		system : "Yuanti SC"
-	windows :
-		system : "Microsoft YaHei"
-	linux :
-		file :
-			path : "soluna/website/public/fonts/SourceHanSansSC-Regular.ttf"
-			family : "Source Han Sans SC"

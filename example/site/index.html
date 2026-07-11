@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Miru is a lightweight reactive UI framework for Soluna 2D.">
+    <meta name="theme-color" content="#132a25">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23132a25'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='36' font-family='sans-serif' font-weight='700' fill='white'%3EM%3C/text%3E%3C/svg%3E">
+    <title>Miru - Reactive UI for Soluna</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Miru home">
+        <span class="brand-mark" aria-hidden="true">M</span>
+        <span>Miru</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="#workbench">Workbench</a>
+        <a href="#start">Get started</a>
+        <a href="#api">API</a>
+        <a href="#components">Components</a>
+      </nav>
+      <a class="header-link" href="https://github.com/soluna2d/miru">GitHub</a>
+    </header>
+
+    <main id="top">
+      <section class="intro-band" aria-labelledby="intro-title">
+        <div class="intro-copy">
+          <p class="eyebrow">Reactive UI for Soluna 2D</p>
+          <h1 id="intro-title">Miru</h1>
+          <p class="intro-lead">
+            Build native and web interfaces from Lua components, reactive values, Yoga layout,
+            and Soluna material streams.
+          </p>
+          <div class="intro-actions">
+            <a class="command primary-command" href="#workbench">Open live workbench</a>
+            <a class="command secondary-command" href="#start">Read the guide</a>
+          </div>
+        </div>
+        <div class="intro-spec" aria-label="Miru at a glance">
+          <div><strong>1 file</strong><span>Miru runtime</span></div>
+          <div><strong>Lua</strong><span>Component model</span></div>
+          <div><strong>Yoga</strong><span>Layout engine</span></div>
+          <div><strong>WASM</strong><span>Web delivery</span></div>
+        </div>
+      </section>
+
+      <section class="workbench-band" id="workbench" aria-labelledby="workbench-title">
+        <div class="section-heading light-heading">
+          <p class="eyebrow">Built by Miru, running now</p>
+          <h2 id="workbench-title">Component workbench</h2>
+          <p>
+            Every control below is rendered by the same Lua source used by the native example.
+            Hover, click, type, focus, open menus, and scroll inside the canvas.
+          </p>
+        </div>
+        <div class="runtime-shell" data-runtime-shell>
+          <canvas id="miru-canvas" tabindex="0" aria-label="Interactive Miru component workbench"></canvas>
+          <div class="runtime-status" data-runtime-status role="status">
+            <span class="status-pulse" aria-hidden="true"></span>
+            <span data-runtime-message>Preparing Soluna WebAssembly...</span>
+          </div>
+        </div>
+        <p class="runtime-note">
+          Requires a WebGPU-capable browser. The first visit reloads once to establish cross-origin isolation.
+        </p>
+      </section>
+
+      <section class="docs-band" id="start" aria-labelledby="start-title">
+        <div class="section-heading">
+          <p class="eyebrow">Start with the runtime boundary</p>
+          <h2 id="start-title">Get started</h2>
+          <p>Miru stays small by delegating windows, input, rendering, fonts, and layout primitives to Soluna.</p>
+        </div>
+        <div class="guide-grid">
+          <article class="guide-step">
+            <span class="step-number">01</span>
+            <h3>Add Miru beside Soluna</h3>
+            <pre><code>git submodule update --init --recursive
+cp miru.lua your-app/miru.lua</code></pre>
+          </article>
+          <article class="guide-step">
+            <span class="step-number">02</span>
+            <h3>Create a view</h3>
+            <pre><code>local miru = require "miru"
+
+local view = miru.new {
+    width = args.width,
+    height = args.height,
+    component_path = "components/?.lua;?.lua",
+}</code></pre>
+          </article>
+          <article class="guide-step wide-step">
+            <span class="step-number">03</span>
+            <h3>Mount stateful components</h3>
+            <pre><code>local count = miru.value(0)
+
+return function()
+    miru.vbox({ width = 320, gap = 12 }, function()
+        miru.text("Count: " .. count())
+        miru.mount("button", {
+            label = "Increment",
+            on_click = function()
+                count(count() + 1)
+            end,
+        })
+    end)
+end</code></pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="model-band" aria-labelledby="model-title">
+        <div class="section-heading">
+          <p class="eyebrow">One predictable loop</p>
+          <h2 id="model-title">Mental model</h2>
+        </div>
+        <ol class="model-flow">
+          <li><strong>Values</strong><span>Read reactive state during component render.</span></li>
+          <li><strong>Layout</strong><span>Compose box, hbox, vbox, canvas, and text nodes.</span></li>
+          <li><strong>Interaction</strong><span>Attach click, focus, scroll, and dismiss behavior.</span></li>
+          <li><strong>Frame</strong><span>Update animations, then draw one Soluna batch.</span></li>
+        </ol>
+      </section>
+
+      <section class="docs-band" id="api" aria-labelledby="api-title">
+        <div class="section-heading">
+          <p class="eyebrow">Small public surface</p>
+          <h2 id="api-title">Core API</h2>
+          <p>The runtime separates view ownership, reactive primitives, layout nodes, and interaction modifiers.</p>
+        </div>
+        <div class="api-table" role="table" aria-label="Miru core API">
+          <div class="api-row" role="row"><code>miru.new</code><span>Own the root tree, input routing, animation clock, layout, and draw lifecycle.</span></div>
+          <div class="api-row" role="row"><code>miru.value</code><span>Create dependency-tracked mutable state with callable read/write syntax.</span></div>
+          <div class="api-row" role="row"><code>miru.computed</code><span>Derive cached values from other reactive dependencies.</span></div>
+          <div class="api-row" role="row"><code>miru.animated</code><span>Move a numeric target through a duration and easing function.</span></div>
+          <div class="api-row" role="row"><code>miru.mount</code><span>Resolve a component module and preserve its local reactive scope.</span></div>
+          <div class="api-row" role="row"><code>box / hbox / vbox</code><span>Build Yoga-backed layout nodes with absolute, flex, and overflow behavior.</span></div>
+          <div class="api-row" role="row"><code>miru.canvas</code><span>Write Soluna command streams inside a measured layout rectangle.</span></div>
+          <div class="api-row" role="row"><code>miru.text</code><span>Render measured styled text with inherited text registries.</span></div>
+          <div class="api-row" role="row"><code>clickable / focusable</code><span>Route pointer, keyboard, character, and clipboard events.</span></div>
+          <div class="api-row" role="row"><code>scrollable / dismissable</code><span>Own wheel input and outside-click dismissal without global handlers.</span></div>
+          <div class="api-row" role="row"><code>provide / use</code><span>Inject shared services or theme data through the active component context.</span></div>
+          <div class="api-row" role="row"><code>ref / expose / slot</code><span>Bridge measured nodes, public component methods, and parent-provided content.</span></div>
+        </div>
+      </section>
+
+      <section class="components-band" id="components" aria-labelledby="components-title">
+        <div class="section-heading light-heading">
+          <p class="eyebrow">Examples, not a locked design system</p>
+          <h2 id="components-title">Component patterns</h2>
+          <p>
+            Miru provides primitives rather than a fixed widget kit. The example components show how those primitives
+            become reusable controls while keeping product styling in application code.
+          </p>
+        </div>
+        <div class="component-index">
+          <span>Surface</span><span>Separator</span><span>Button</span><span>IconButton</span>
+          <span>Switch</span><span>Dropdown</span><span>TextField</span><span>FormActions</span>
+          <span>Message</span><span>ScrollArea</span><span>Motion</span>
+        </div>
+      </section>
+
+      <section class="architecture-band" aria-labelledby="architecture-title">
+        <div class="section-heading">
+          <p class="eyebrow">Clear ownership</p>
+          <h2 id="architecture-title">Architecture boundary</h2>
+        </div>
+        <div class="architecture-grid">
+          <div><h3>Your application</h3><p>Components, design tokens, state, domain behavior, and material choices.</p></div>
+          <div><h3>Miru</h3><p>Reactive dependency tracking, component lifecycle, interaction routing, and layout composition.</p></div>
+          <div><h3>Soluna</h3><p>Windowing, WebGPU rendering, text and material streams, files, and platform delivery.</p></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Miru</span>
+      <span>Lua reactive UI for Soluna 2D</span>
+      <a href="https://github.com/soluna2d/miru">Source</a>
+    </footer>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
