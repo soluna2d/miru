@@ -2,6 +2,7 @@ local copy = require "example.copy"
 local miru = require "miru"
 
 local args = ...
+local drag_y
 
 return function()
 	local palette = miru.use "palette"
@@ -14,6 +15,22 @@ return function()
 			if args.on_scroll then
 				args.on_scroll(event.scroll_y)
 			end
+		end,
+		on_pointer_down = function(event)
+			drag_y = event.client_y
+		end,
+		on_pointer_move = function(event)
+			if drag_y == nil then
+				return
+			end
+			local delta = drag_y - event.client_y
+			drag_y = event.client_y
+			if delta ~= 0 and args.on_drag then
+				args.on_drag(delta)
+			end
+		end,
+		on_pointer_up = function()
+			drag_y = nil
 		end,
 	}
 	miru.box({

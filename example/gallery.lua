@@ -466,6 +466,9 @@ local function scroll_area_demo(width, height)
 			on_scroll = function(delta)
 				scroll_offset(clamp(scroll_offset() + delta * 18, 0, 180))
 			end,
+			on_drag = function(delta)
+				scroll_offset(clamp(scroll_offset() + delta, 0, 180))
+			end,
 		})
 		metric("Scroll offset", tostring(pixel(scroll_offset())), min(190, inner_width))
 	end)
