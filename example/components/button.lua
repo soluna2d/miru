@@ -1,3 +1,4 @@
+local icons = require "example.icons"
 local miru = require "miru"
 
 local args = ...
@@ -27,6 +28,8 @@ return function()
 	local width = args.width or 120
 	local height = args.height or 38
 	local background, color, border = colors(palette, args.kind, hovered, pressed, args.active)
+	local icon_size = args.right_icon and (args.icon_size or 16) or 0
+	local gap = icon_size > 0 and 6 or 0
 
 	miru.clickable {
 		enabled = args.enabled,
@@ -50,11 +53,19 @@ return function()
 			border_width = 1,
 		})
 		miru.text(args.label or "", {
-			width = max(0, width - 16),
+			width = max(0, width - 16 - icon_size - gap),
 			height = max(0, height - 16),
 			size = args.size or 14,
 			color = color,
 			align = "CV",
 		})
+		if args.right_icon then
+			icons.node(args.right_icon, {
+				width = icon_size,
+				height = max(0, height - 16),
+				size = icon_size,
+				color = color,
+			})
+		end
 	end)
 end

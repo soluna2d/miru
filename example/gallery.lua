@@ -165,7 +165,7 @@ local function mobile_navigation(width, selected_index, select_component)
 	}, function()
 		miru.mount("icon_button", {
 			size = 42,
-			symbol = "<",
+			icon = "chevron_left",
 			on_click = function()
 				select_component(selected_index == 1 and #COMPONENTS or selected_index - 1)
 			end,
@@ -183,7 +183,7 @@ local function mobile_navigation(width, selected_index, select_component)
 		end)
 		miru.mount("icon_button", {
 			size = 42,
-			symbol = ">",
+			icon = "chevron_right",
 			on_click = function()
 				select_component(selected_index == #COMPONENTS and 1 or selected_index + 1)
 			end,
@@ -265,7 +265,7 @@ local dropdown_value = miru.value(DROPDOWN_OPTIONS[1])
 local text_value = miru.value "https://api.example.dev/v1"
 local form_status = miru.value "Unsaved changes"
 local scroll_offset = miru.value(0)
-local selected_index = miru.value(5)
+local selected_index = miru.value(4)
 local phase = miru.value(0)
 
 local function button_demo(width, height)
@@ -304,15 +304,15 @@ end
 
 local function icon_button_demo(width, height)
 	panel(width, height, function(inner_width)
-		title("IconButton", "Compact commands use a stable square hit target and familiar symbols.", inner_width)
+		title("IconButton", "Compact commands use a stable square hit target and Lucide icons.", inner_width)
 		miru.hbox({
 			width = inner_width,
 			height = 42,
 			gap = 10,
 		}, function()
-			for _, symbol in ipairs { "+", "-", "x" } do
+			for _, icon in ipairs { "refresh_cw", "pencil", "close" } do
 				miru.mount("icon_button", {
-					symbol = symbol,
+					icon = icon,
 					on_click = function()
 						icon_button_count(icon_button_count() + 1)
 					end,

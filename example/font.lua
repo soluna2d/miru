@@ -1,8 +1,12 @@
 local file = require "soluna.file"
 local font = require "soluna.font"
+local icon = require "soluna.icon"
+local mattext = require "soluna.material.text"
+local richtext = require "soluna.text"
 local soluna = require "soluna"
 
 local loaded
+local icons_initialized
 
 local function load()
 	if loaded then
@@ -25,6 +29,22 @@ local function load()
 end
 
 local M = {}
+
+function M.init_icons()
+	local source = load()
+	if not icons_initialized then
+		richtext.init "example/asset/icons.dl"
+		icons_initialized = true
+	end
+	return source
+end
+
+function M.icon(name, size, color)
+	local source = M.init_icons()
+	local id = assert(icon.names[name], "missing Lucide icon: " .. tostring(name))
+	local block = mattext.block(source.cobj, source.id, size, color, "LT")
+	return block("[i" .. tostring(id) .. "]", size, size)
+end
 
 function M.styles()
 	local source = load()

@@ -57,6 +57,7 @@ example/main.game        Native application settings
 example/main.lua         Soluna application bridge
 example/gallery.lua      Interactive component workbench
 example/components/      Reusable component examples
+example/asset/           Lucide icon bundle used by the workbench
 example/site/            Documentation shell
 example/scripts/         WebAssembly site packaging
 soluna/                  Soluna git submodule

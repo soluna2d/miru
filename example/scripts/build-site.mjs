@@ -37,10 +37,11 @@ async function stageMainZip(outputPath) {
     await mkdir(path.join(staging, 'example'), { recursive: true })
     await copyFile(path.join(rootDir, 'miru.lua'), path.join(staging, 'miru.lua'))
     await copyFile(path.join(exampleDir, 'main.game'), path.join(staging, 'main.game'))
-    for (const file of ['main.lua', 'gallery.lua', 'font.lua', 'palette.lua']) {
+    for (const file of ['main.lua', 'gallery.lua', 'font.lua', 'icons.lua', 'palette.lua']) {
       await copyFile(path.join(exampleDir, file), path.join(staging, 'example', file))
     }
     await cp(path.join(exampleDir, 'components'), path.join(staging, 'example', 'components'), { recursive: true })
+    await cp(path.join(exampleDir, 'asset'), path.join(staging, 'example', 'asset'), { recursive: true })
     await createZip(outputPath, staging, ['.'])
   }
   finally {
