@@ -1,3 +1,4 @@
+local icons = require "example.icons"
 local miru = require "miru"
 
 local args = ...
@@ -28,12 +29,11 @@ return function()
 			border_color = palette.line,
 			border_width = 1,
 		})
-		miru.text(args.symbol or "+", {
+		icons.node(args.icon or "refresh_cw", {
 			width = size,
 			height = size,
 			size = args.icon_size or 18,
 			color = color,
-			align = "CV",
 		})
 	end)
 end

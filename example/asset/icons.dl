@@ -1,0 +1,21 @@
+--
+name : chevron_left
+image : icons/chevron_left.png
+--
+name : chevron_right
+image : icons/chevron_right.png
+--
+name : chevron_down
+image : icons/chevron_down.png
+--
+name : chevron_up
+image : icons/chevron_up.png
+--
+name : refresh_cw
+image : icons/refresh_cw.png
+--
+name : pencil
+image : icons/pencil.png
+--
+name : close
+image : icons/close.png

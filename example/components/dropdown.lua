@@ -31,7 +31,8 @@ return function()
 		miru.mount("button", {
 			width = width,
 			height = 40,
-			label = (args.value or "Select") .. (open and "  -" or "  +"),
+			label = args.value or "Select",
+			right_icon = open and "chevron_up" or "chevron_down",
 			on_click = args.on_toggle,
 		})
 		if open then

@@ -1,5 +1,6 @@
 local app = require "soluna.app"
 local font = require "example.font"
+local icons = require "example.icons"
 local miru = require "miru"
 local palette = require "example.palette"
 local soluna = require "soluna"
@@ -19,7 +20,9 @@ local view = miru.new {
 	height = viewport_height,
 	component_path = "example/components/?.lua;example/?.lua;?.lua;?/init.lua",
 }
-view:text_styles(font.styles())
+local text_styles = font.styles()
+icons.init()
+view:text_styles(text_styles)
 view:provide("palette", palette)
 
 ---@class GalleryInstance : MiruInstance
