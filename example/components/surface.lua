@@ -10,13 +10,8 @@ end
 
 return function()
 	miru.canvas({
-		width = args.width or "100%",
-		height = args.height or "100%",
-		position = args.position,
-		left = args.left,
-		top = args.top,
-		right = args.right,
-		bottom = args.bottom,
+		width = "100%",
+		height = "100%",
 	}, function(width, height)
 		local fill = args.fill
 		if fill == nil then
