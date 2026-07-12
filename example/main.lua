@@ -1,6 +1,7 @@
 local app = require "soluna.app"
 local font = require "example.font"
 local icons = require "example.icons"
+local input = require "example.input"
 local miru = require "miru"
 local palette = require "example.palette"
 local soluna = require "soluna"
@@ -16,6 +17,7 @@ local args = ...
 local viewport_width = args.width
 local viewport_height = args.height
 local touch_active = false
+local device = input.new()
 
 soluna.set_window_title "Miru Component Workbench"
 
@@ -54,23 +56,19 @@ function callback.frame()
 	view:draw(args.batch)
 end
 
-function callback.key(keycode, state)
+function callback.key(keycode, state, modifiers)
 	if keycode == KEY_ESCAPE and state == KEYSTATE_PRESS then
 		app.quit()
 		return
 	end
-	if state == KEYSTATE_PRESS or state == KEYSTATE_REPEAT then
-		view:key {
-			keycode = keycode,
-			state = state,
-		}
+	local event = device:key(keycode, state, modifiers)
+	if event and (state == KEYSTATE_PRESS or state == KEYSTATE_REPEAT) then
+		view:key(event)
 	end
 end
 
-function callback.char(codepoint)
-	view:char {
-		codepoint = codepoint,
-	}
+function callback.char(value)
+	view:char(device:char(value))
 end
 
 function callback.clipboard_pasted(value)

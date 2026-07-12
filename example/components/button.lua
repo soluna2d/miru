@@ -49,6 +49,7 @@ return function()
 			top = 0,
 			width = "100%",
 			height = "100%",
+			radius = args.radius or 5,
 			fill = background,
 			border_color = border,
 			border_width = 1,

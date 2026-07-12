@@ -50,6 +50,7 @@ local function panel(width, height, children)
 			top = 0,
 			width = "100%",
 			height = "100%",
+			radius = 8,
 			fill = palette.surface,
 			border_color = palette.line,
 			border_width = 1,
@@ -94,6 +95,7 @@ local function metric(label, value, width)
 			top = 0,
 			width = "100%",
 			height = "100%",
+			radius = 4,
 			fill = palette.surface_alt,
 		})
 		miru.text(copy.group(label), {
@@ -217,6 +219,7 @@ local function surface_demo(width, height)
 						top = 0,
 						width = "100%",
 						height = "100%",
+						radius = 6,
 						fill = fill,
 						border_color = palette.line,
 						border_width = 1,
@@ -377,22 +380,14 @@ end
 
 local function text_field_demo(width, height)
 	panel(width, height, function(inner_width)
-		title("TextField", "Focus, character, key, and clipboard events stay inside the component boundary.", inner_width)
+		title("TextField", "IME, cursor, drag selection, and platform shortcuts stay inside the component boundary.", inner_width)
 		miru.mount("text_field", {
 			width = min(480, inner_width),
 			label = "Endpoint",
 			placeholder = "Enter a runtime endpoint",
 			value = text_value(),
-			on_char = function(codepoint)
-				text_value(text_value() .. utf8.char(codepoint))
-			end,
-			on_backspace = function()
-				local current = text_value()
-				local offset = utf8.offset(current, -1)
-				text_value(offset and current:sub(1, offset - 1) or "")
-			end,
-			on_paste = function(value)
-				text_value(text_value() .. value)
+			on_change = function(value)
+				text_value(value)
 			end,
 		})
 		miru.hbox({

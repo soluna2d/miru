@@ -42,17 +42,19 @@ return function()
 			top = 0,
 			width = "100%",
 			height = "100%",
+			radius = height // 2,
 			fill = fill,
 			border_color = border,
 			border_width = 1,
 		})
-		miru.box {
+		miru.mount("surface", {
 			position = "absolute",
 			left = 4 + (width - knob - 8) * value,
 			top = (height - knob) // 2,
 			width = knob,
 			height = knob,
-			background = enabled and palette.white or 0xffaab4b0,
-		}
+			radius = knob // 2,
+			fill = enabled and palette.white or 0xffaab4b0,
+		})
 	end)
 end

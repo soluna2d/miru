@@ -1,9 +1,8 @@
-local matquad = require "soluna.material.quad"
 local miru = require "miru"
+local rounded_rect = require "example.rounded_rect"
 
 local args = ...
 local floor <const> = math.floor
-local max <const> = math.max
 
 local function pixel(value)
 	return floor((value or 0) + 0.5)
@@ -30,16 +29,11 @@ return function()
 			return
 		end
 
-		local border_width = pixel(args.border_width or 0)
-		if border_width > 0 then
-			miru.batch:add(matquad.quad(w, h, args.border_color or fill), 0, 0)
-			local inner_width = max(0, w - border_width * 2)
-			local inner_height = max(0, h - border_width * 2)
-			if inner_width > 0 and inner_height > 0 then
-				miru.batch:add(matquad.quad(inner_width, inner_height, fill), border_width, border_width)
-			end
-		else
-			miru.batch:add(matquad.quad(w, h, fill), 0, 0)
-		end
+		rounded_rect.draw(miru.batch, w, h, {
+			radius = args.radius or 0,
+			fill = fill,
+			border = args.border_color or fill,
+			border_width = pixel(args.border_width or 0),
+		})
 	end)
 end
