@@ -25,6 +25,7 @@ return function()
 			top = 0,
 			width = "100%",
 			height = "100%",
+			radius = args.radius or 6,
 			fill = fill,
 			border_color = palette.line,
 			border_width = 1,

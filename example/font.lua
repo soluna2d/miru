@@ -7,6 +7,7 @@ local soluna = require "soluna"
 
 local loaded
 local icons_initialized
+local text_builders = {}
 
 local function load()
 	if loaded then
@@ -75,6 +76,25 @@ function M.styles()
 			color = 0xff5b6965,
 		},
 	}
+end
+
+function M.layout(text, size, color, alignment, width, height)
+	local source = load()
+	alignment = alignment or "LV"
+	local key = table.concat({ size, color, alignment }, ":")
+	local builder = text_builders[key]
+	if not builder then
+		local block, layout = mattext.block(source.cobj, source.id, size, color, alignment)
+		builder = { block = block, layout = layout }
+		text_builders[key] = builder
+	end
+	local tagged = tostring(text or ""):gsub("%[", "[[")
+	return builder.block(tagged, width, height), builder.layout(tagged, width, height)
+end
+
+function M.name()
+	load()
+	return "Source Han Sans SC Regular"
 end
 
 return M

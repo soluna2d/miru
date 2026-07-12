@@ -47,6 +47,7 @@ return function()
 					top = 0,
 					width = "100%",
 					height = "100%",
+					radius = 6,
 					fill = palette.surface,
 					border_color = palette.line,
 					border_width = 1,

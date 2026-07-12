@@ -44,6 +44,7 @@ return function()
 			top = 0,
 			width = "100%",
 			height = "100%",
+			radius = 6,
 			fill = palette.surface,
 			border_color = palette.line,
 			border_width = FRAME_WIDTH,
@@ -77,6 +78,7 @@ return function()
 								top = 0,
 								width = "100%",
 								height = "100%",
+								radius = 3,
 								fill = palette.surface_alt,
 							})
 						end

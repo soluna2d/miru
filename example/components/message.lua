@@ -33,6 +33,7 @@ return function()
 			top = 0,
 			width = "100%",
 			height = "100%",
+			radius = 6,
 			fill = role_fill,
 			border_color = palette.line,
 			border_width = 1,
@@ -43,11 +44,12 @@ return function()
 			alignItems = "center",
 			gap = 8,
 		}, function()
-			miru.box {
+			miru.mount("surface", {
 				width = 8,
 				height = 8,
-				background = role_color,
-			}
+				radius = 4,
+				fill = role_color,
+			})
 			miru.text(copy.group(args.title or role), {
 				width = width - 44,
 				height = 20,
