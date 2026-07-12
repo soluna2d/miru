@@ -2573,7 +2573,11 @@ local View = {}; do
 		set_hovered(self, hover_target)
 		set_clickable_hovered(self, active_target, x, y)
 		set_mouse_cursor(self, clickable_cursor(target))
-		if active_target then
+		local pressed = self.pressed_instance
+		if pressed and pressed.mounted then
+			call_clickable(pressed, "on_pointer_move",
+				pointer_event_at(pressed, pressed, x, y))
+		elseif active_target then
 			call_clickable(active_target, "on_pointer_move",
 				pointer_event(active_target, active_target, tx or 0, ty or 0, x, y))
 		end
