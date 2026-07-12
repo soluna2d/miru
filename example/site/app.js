@@ -64,6 +64,70 @@ function resizeCanvas() {
   }
 }
 
+function installTouchImeActivation(runtime) {
+  let pendingTouchFocus = false
+  let clearPendingTouchFocus = 0
+  let ime = runtime.solunaIme
+  const installedStates = new WeakSet()
+
+  const installState = state => {
+    if (!state || installedStates.has(state) || typeof state.queueFocus !== 'function') {
+      return
+    }
+    installedStates.add(state)
+    const queueFocus = state.queueFocus
+    const focus = () => {
+      if (!pendingTouchFocus || !state.active || !state.node) {
+        queueFocus()
+        return
+      }
+      pendingTouchFocus = false
+      window.clearTimeout(clearPendingTouchFocus)
+      queueFocus.cancel()
+      state.node.style.display = 'block'
+      // Keep the touch activation without re-entering Soluna's current event.
+      queueMicrotask(() => {
+        if (!state.active || !state.node) {
+          return
+        }
+        if (typeof state.focusNode === 'function') {
+          state.focusNode()
+        } else {
+          state.node.focus({ preventScroll: true })
+        }
+      })
+    }
+    focus.cancel = () => queueFocus.cancel()
+    state.queueFocus = focus
+  }
+
+  // Soluna creates its IME state lazily after the first focused text field.
+  Object.defineProperty(runtime, 'solunaIme', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return ime
+    },
+    set(state) {
+      ime = state
+      installState(state)
+    },
+  })
+  installState(ime)
+
+  canvas.addEventListener('touchstart', () => {
+    pendingTouchFocus = true
+    window.clearTimeout(clearPendingTouchFocus)
+    clearPendingTouchFocus = window.setTimeout(() => {
+      pendingTouchFocus = false
+    }, 750)
+  }, { passive: true })
+  canvas.addEventListener('touchcancel', () => {
+    pendingTouchFocus = false
+    window.clearTimeout(clearPendingTouchFocus)
+  }, { passive: true })
+}
+
 async function start() {
   if (!canvas || !status || !statusMessage) {
     return
@@ -93,7 +157,7 @@ async function start() {
   resizeObserver.observe(canvas)
   canvas.addEventListener('pointerdown', () => canvas.focus())
 
-  await runtimeApi.default({
+  const runtime = await runtimeApi.default({
     arguments: [
       'zipfile=/data/main.zip:/data/asset.zip:/data/font.zip',
       'cpath=/data/?.wasm',
@@ -120,6 +184,7 @@ async function start() {
       setStatus(`Runtime aborted: ${String(reason || 'unknown error')}`)
     },
   })
+  installTouchImeActivation(runtime)
   hideStatus()
 }
 
