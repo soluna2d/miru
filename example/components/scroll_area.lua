@@ -3,6 +3,7 @@ local miru = require "miru"
 
 local args = ...
 local drag_y
+local FRAME_WIDTH <const> = 1
 
 return function()
 	local palette = miru.use "palette"
@@ -36,7 +37,6 @@ return function()
 	miru.box({
 		width = width,
 		height = height,
-		overflow = "hidden",
 	}, function()
 		miru.mount("surface", {
 			position = "absolute",
@@ -46,41 +46,50 @@ return function()
 			height = "100%",
 			fill = palette.surface,
 			border_color = palette.line,
-			border_width = 1,
+			border_width = FRAME_WIDTH,
 		})
-		miru.vbox({
+		miru.box({
 			position = "absolute",
-			left = 12,
-			top = 12 - offset,
-			width = width - 24,
-			gap = 7,
+			left = FRAME_WIDTH,
+			top = FRAME_WIDTH,
+			width = width - FRAME_WIDTH * 2,
+			height = height - FRAME_WIDTH * 2,
+			overflow = "hidden",
 		}, function()
-			for i = 1, 12 do
-				miru.hbox({
-					width = width - 24,
-					height = 26,
-					padding = 6,
-					alignItems = "center",
-				}, function()
-					if i % 2 == 0 then
-						miru.mount("surface", {
-							position = "absolute",
-							left = 0,
-							top = 0,
-							width = "100%",
-							height = "100%",
-							fill = palette.surface_alt,
+			miru.vbox({
+				position = "absolute",
+				left = 12 - FRAME_WIDTH,
+				top = 12 - FRAME_WIDTH - offset,
+				width = width - 24,
+				gap = 7,
+			}, function()
+				for i = 1, 12 do
+					miru.hbox({
+						width = width - 24,
+						height = 26,
+						padding = 6,
+						alignItems = "center",
+					}, function()
+						if i % 2 == 0 then
+							miru.mount("surface", {
+								position = "absolute",
+								left = 0,
+								top = 0,
+								width = "100%",
+								height = "100%",
+								fill = palette.surface_alt,
+							})
+						end
+						miru.text(copy.group("Virtual row " .. tostring(i)), {
+							width = width - 36,
+							height = 16,
+							size = 13,
+							color = i % 3 == 0 and palette.primary or palette.text,
+							align = "LV",
 						})
-					end
-					miru.text(copy.group("Virtual row " .. tostring(i)), {
-						width = width - 36,
-						height = 16,
-						size = 13,
-						color = i % 3 == 0 and palette.primary or palette.text,
-						align = "LV",
-					})
-				end)
-			end
+					end)
+				end
+			end)
 		end)
 	end)
 end
