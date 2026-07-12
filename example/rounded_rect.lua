@@ -8,6 +8,7 @@ local floor <const> = math.floor
 local max <const> = math.max
 local min <const> = math.min
 local sqrt <const> = math.sqrt
+local SUPERSAMPLE <const> = 3
 
 local sprites = {}
 local masks = {}
@@ -92,11 +93,27 @@ function M.draw(batch, width, height, options)
 	if width <= 0 or height <= 0 then
 		return
 	end
-	local radius = options.radius or 0
+	local radius = floor(min(max(options.radius or 0, 0), width / 2, height / 2))
 	local fill = options.fill
 	local border_width = floor((options.border_width or 0) + 0.5)
+	if radius <= 0 then
+		if border_width <= 0 then
+			add_quad(batch, width, height, fill, 0, 0)
+			return
+		end
+		add_quad(batch, width, height, options.border or fill, 0, 0)
+		add_quad(batch, width - border_width * 2, height - border_width * 2, fill, border_width, border_width)
+		return
+	end
+
+	width = width * SUPERSAMPLE
+	height = height * SUPERSAMPLE
+	radius = radius * SUPERSAMPLE
+	border_width = border_width * SUPERSAMPLE
+	batch:layer(1 / SUPERSAMPLE, 0, 0)
 	if border_width <= 0 then
 		add_fill(batch, width, height, radius, fill, 0, 0)
+		batch:layer()
 		return
 	end
 	add_fill(batch, width, height, radius, options.border or fill, 0, 0)
@@ -105,6 +122,7 @@ function M.draw(batch, width, height, options)
 	if inner_width > 0 and inner_height > 0 then
 		add_fill(batch, inner_width, inner_height, max(0, radius - border_width), fill, border_width, border_width)
 	end
+	batch:layer()
 end
 
 return M
