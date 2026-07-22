@@ -18,6 +18,7 @@ local COMPONENTS <const> = {
 	"FormActions",
 	"Message",
 	"ScrollArea",
+	"Transition",
 	"Motion",
 }
 
@@ -268,6 +269,9 @@ local text_value = miru.value "https://api.example.dev/v1"
 local form_status = miru.value "Unsaved changes"
 local scroll_offset = miru.value(0)
 local selected_index = miru.value(4)
+local transition_expanded = miru.value(false)
+local transition_visible = miru.value(true)
+local transition_key = miru.value(1)
 local phase = miru.value(0)
 
 local function button_demo(width, height)
@@ -474,6 +478,119 @@ local function scroll_area_demo(width, height)
 	end)
 end
 
+local function transition_demo(width, height)
+	local palette = miru.use "palette"
+	panel(width, height, function(inner_width)
+		title("Transition", "Retarget properties and retain keyed content through enter and leave phases.", inner_width)
+		local button_width = pixel((inner_width - 16) / 3)
+		miru.hbox({
+			width = inner_width,
+			height = 38,
+			gap = 8,
+		}, function()
+			miru.mount("button", {
+				width = button_width,
+				height = 38,
+				label = "Retarget",
+				on_click = function()
+					transition_expanded(not transition_expanded())
+				end,
+			})
+			miru.mount("button", {
+				width = button_width,
+				height = 38,
+				label = transition_visible() and "Hide" or "Show",
+				on_click = function()
+					transition_visible(not transition_visible())
+				end,
+			})
+			miru.mount("button", {
+				width = button_width,
+				height = 38,
+				label = "Next",
+				on_click = function()
+					transition_key(transition_key() + 1)
+				end,
+			})
+		end)
+
+		local expanded = transition_expanded()
+		local track_width = expanded and min(360, inner_width) or min(190, inner_width)
+		local track_height = expanded and 68 or 46
+		miru.hbox({
+			width = inner_width,
+			height = 82,
+			alignItems = "center",
+		}, function()
+			miru.box({
+				width = track_width,
+				height = track_height,
+				background = expanded and palette.accent_soft or palette.primary_soft,
+				overflow = "hidden",
+				transition = {
+					properties = { "width", "height", "background" },
+					duration = 0.32,
+					easing = "in_out_cubic",
+				},
+			}, function()
+				miru.text(copy.group(expanded and "Continuous retarget" or "Property track"), {
+					width = track_width,
+					height = track_height,
+					size = 15,
+					color = palette.text,
+					align = "CV",
+				})
+			end)
+		end)
+
+		local presence_width = min(360, inner_width)
+		miru.box({
+			width = inner_width,
+			height = 72,
+			overflow = "hidden",
+		}, function()
+			miru.transition({
+				position = "absolute",
+				left = 0,
+				top = 0,
+				show = transition_visible(),
+				content_key = transition_key(),
+				width = presence_width,
+				height = 64,
+				translateX = 0,
+				overflow = "hidden",
+				enter_from = {
+					height = 0,
+					translateX = 24,
+				},
+				leave_to = {
+					height = 0,
+					translateX = -24,
+				},
+				duration = 0.24,
+				easing = "out_cubic",
+				mode = "simultaneous",
+			}, function(key)
+				miru.box({
+					width = presence_width,
+					height = 64,
+					padding = 12,
+					background = key % 2 == 0 and palette.accent_soft or palette.surface_alt,
+				}, function()
+					miru.text(copy.group("Keyed state " .. tostring(key)), {
+						width = presence_width - 24,
+						height = 40,
+						size = 15,
+						color = palette.text,
+						align = "LV",
+					})
+				end)
+			end)
+		end)
+		metric("Presence", transition_visible() and "mounted" or "hidden", min(210, inner_width))
+	end)
+end
+
 local function motion_demo(width, height)
 	local palette = miru.use "palette"
 	panel(width, height, function(inner_width)
@@ -519,9 +636,33 @@ local function demo(name, width, height)
 		message_demo(width, height)
 	elseif name == "ScrollArea" then
 		scroll_area_demo(width, height)
+	elseif name == "Transition" then
+		transition_demo(width, height)
 	else
 		motion_demo(width, height)
 	end
+end
+
+local function transitioned_demo(name, width, height)
+	miru.transition({
+		show = true,
+		content_key = name,
+		width = width,
+		height = height,
+		translateX = 0,
+		overflow = "hidden",
+		enter_from = {
+			translateX = 18,
+		},
+		leave_to = {
+			translateX = -18,
+		},
+		duration = 0.2,
+		easing = "out_cubic",
+		mode = "simultaneous",
+	}, function(key)
+		demo(key, width, height)
+	end)
 end
 
 miru.expose {
@@ -576,7 +717,7 @@ return function()
 				})
 			end)
 			mobile_navigation(content_width, current_index, select_component)
-			demo(current_name, content_width, panel_height)
+			transitioned_demo(current_name, content_width, panel_height)
 		end)
 		return
 	end
@@ -615,7 +756,7 @@ return function()
 					color = palette.muted,
 				})
 			end)
-			demo(current_name, panel_width, panel_height)
+			transitioned_demo(current_name, panel_width, panel_height)
 			miru.hbox({
 				width = panel_width,
 				height = 64,

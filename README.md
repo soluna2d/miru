@@ -11,7 +11,7 @@ The documentation site includes a live WebAssembly workbench built from the same
 - Yoga-backed box, horizontal, vertical, absolute, flex, and overflow layout
 - Measured styled text and custom Soluna canvas streams
 - Click, hover, press, focus, keyboard, clipboard, wheel, and outside-dismiss interaction
-- Duration/easing animation and color interpolation
+- Duration/easing animation, typed property transitions, and keyed presence lifecycles
 - Context providers, refs, exposed component methods, and slots
 
 ## Run The Native Example

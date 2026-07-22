@@ -19,7 +19,9 @@ end
 return function()
 	local palette = miru.use "palette"
 	local width = args.width or 280
-	local open = args.open
+	local open = args.open == true
+	local options = args.options or {}
+	local menu_height = #options == 0 and 16 or 10 + #options * 40
 
 	miru.dismissable(open and {
 		on_dismiss = args.on_close,
@@ -35,9 +37,26 @@ return function()
 			right_icon = open and "chevron_up" or "chevron_down",
 			on_click = args.on_toggle,
 		})
-		if open then
+		miru.transition({
+			show = open,
+			width = width,
+			height = menu_height,
+			translateY = 0,
+			overflow = "hidden",
+			enter_from = {
+				height = 0,
+				translateY = -8,
+			},
+			leave_to = {
+				height = 0,
+				translateY = -8,
+			},
+			duration = 0.18,
+			easing = "out_cubic",
+		}, function()
 			miru.vbox({
 				width = width,
+				height = menu_height,
 				padding = 8,
 				gap = 6,
 			}, function()
@@ -51,10 +70,10 @@ return function()
 					border_color = palette.line,
 					border_width = 1,
 				})
-				for _, option in ipairs(args.options or {}) do
+				for _, option in ipairs(options) do
 					option_button(option, width - 16)
 				end
 			end)
-		end
+		end)
 	end)
 end

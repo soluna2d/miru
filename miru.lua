@@ -61,11 +61,74 @@ local DEFAULT_CURSOR <const> = "default"
 ---@field draw fun(width: number, height: number, frame?: integer)?
 ---@field commands MiruCommand[]?
 ---@field props table?
+---@field direction string?
+---@field transition_tracks table<string, MiruTransitionTrack>?
+---@field transition_generation integer?
+---@field presence_id integer?
+---@field world_transform MiruTransform?
+---@field inverse_transform MiruTransform?
+---@field visual_rect MiruRect?
+---@field interactive boolean?
+---@field transition_state MiruPresenceState?
+---@field active_branch_slot integer?
+---@field branch_slot integer?
+---@field branch_revision integer?
 ---@field text any
 ---@field text_layout MiruTextLayout?
 ---@field text_metrics MiruTextMetrics?
 ---@field ref MiruRef?
 ---@field slot_name string?
+
+---@class MiruTransform
+---@field a number
+---@field b number
+---@field c number
+---@field d number
+---@field x number
+---@field y number
+
+---@alias MiruPresencePhase "entering"|"entered"|"leaving"|"left"
+---@alias MiruPresenceKey string|number|boolean
+---@alias MiruPresenceSwitchPhase "idle"|"simultaneous"|"entering"|"leaving"
+
+---@class MiruPresenceBranchState
+---@field key MiruValue<MiruPresenceKey?>
+---@field mounted MiruValue<boolean>
+---@field revision integer
+---@field enter_generation integer
+
+---@class MiruPresenceState
+---@field phase MiruValue<MiruPresencePhase>
+---@field active_key MiruValue<MiruPresenceKey?>
+---@field active_slot MiruValue<integer>
+---@field switch_phase MiruValue<MiruPresenceSwitchPhase>
+---@field branch_one MiruPresenceBranchState
+---@field branch_two MiruPresenceBranchState
+---@field generation integer
+---@field switch_generation integer
+---@field switch_remaining integer
+---@field switch_enter_done boolean
+---@field switch_leave_done boolean
+---@field switch_mode string
+
+---@class (partial) MiruTransitionTrack
+---@field view MiruView
+---@field node MiruRenderNode
+---@field property string
+---@field from number
+---@field to number
+---@field final_to number
+---@field elapsed number
+---@field duration number
+---@field run_duration number
+---@field delay number
+---@field delay_remaining number
+---@field easing fun(t: number): number
+---@field interpolate fun(a: number, b: number, t: number): number
+---@field active boolean?
+---@field listed boolean?
+---@field stopped boolean?
+---@field on_complete fun(track: MiruTransitionTrack)?
 
 ---@class MiruTextMetrics
 ---@field height number
@@ -164,6 +227,8 @@ local flush_dirty_roots
 local build_text_styles
 ---@type fun(view: MiruView, root: MiruComponent)
 local schedule_render_tree_compile
+---@type fun(track: MiruTransitionTrack, value: number)
+local apply_transition_value
 
 ---@class (partial) MiruInstance
 ---@field args table
@@ -213,7 +278,7 @@ local schedule_render_tree_compile
 ---@field mouse_cursor soluna.MouseCursor?
 ---@field stats MiruStatistics
 ---@field provides table
----@field animations MiruAnimation[]
+---@field animations (MiruAnimation|MiruTransitionTrack)[]
 ---@field dismissables MiruComponent[]
 ---@field effect_order integer
 ---@field slots table<string, MiruComponent?>
@@ -221,6 +286,8 @@ local schedule_render_tree_compile
 ---@field dirty_roots table<MiruComponent, boolean>
 ---@field dirty_root_order MiruComponent[]
 ---@field text_style_registry MiruTextStyles?
+---@field stepping_animations boolean?
+---@field presence_sequence integer
 
 ---@class MiruContext
 ---@field view MiruView
@@ -311,6 +378,7 @@ local schedule_render_tree_compile
 ---@field slot fun(name: string, props?: table): MiruInstance
 ---@field expose fun(methods: table)
 ---@field box fun(props?: table, children?: fun()): MiruRenderNode
+---@field transition fun(props: table, children?: fun(key: any)): MiruRenderNode
 ---@field hbox fun(props?: table, children?: fun()): MiruRenderNode
 ---@field vbox fun(props?: table, children?: fun()): MiruRenderNode
 ---@field canvas fun(props?: table, draw?: fun(width: number, height: number, frame?: integer)): MiruRenderNode
@@ -493,6 +561,80 @@ local function lerp_color(a, b, t)
 	return (ca << 24) | (cr << 16) | (cg << 8) | cb
 end
 
+local IDENTITY_TRANSFORM <const> = {
+	a = 1,
+	b = 0,
+	c = 0,
+	d = 1,
+	x = 0,
+	y = 0,
+}
+
+---@param parent MiruTransform
+---@param child MiruTransform
+---@return MiruTransform
+local function multiply_transform(parent, child)
+	return {
+		a = parent.a * child.a + parent.c * child.b,
+		b = parent.b * child.a + parent.d * child.b,
+		c = parent.a * child.c + parent.c * child.d,
+		d = parent.b * child.c + parent.d * child.d,
+		x = parent.a * child.x + parent.c * child.y + parent.x,
+		y = parent.b * child.x + parent.d * child.y + parent.y,
+	}
+end
+
+---@param transform MiruTransform
+---@return MiruTransform?
+local function inverse_transform(transform)
+	local determinant = transform.a * transform.d - transform.b * transform.c
+	if determinant == 0 then
+		return nil
+	end
+	local a = transform.d / determinant
+	local b = -transform.b / determinant
+	local c = -transform.c / determinant
+	local d = transform.a / determinant
+	return {
+		a = a,
+		b = b,
+		c = c,
+		d = d,
+		x = -(a * transform.x + c * transform.y),
+		y = -(b * transform.x + d * transform.y),
+	}
+end
+
+---@param transform MiruTransform
+---@param x number
+---@param y number
+---@return number, number
+local function transform_point(transform, x, y)
+	return transform.a * x + transform.c * y + transform.x,
+		transform.b * x + transform.d * y + transform.y
+end
+
+---@param transform MiruTransform
+---@param width number
+---@param height number
+---@return MiruRect
+local function transform_rect(transform, width, height)
+	local x1, y1 = transform_point(transform, 0, 0)
+	local x2, y2 = transform_point(transform, width, 0)
+	local x3, y3 = transform_point(transform, 0, height)
+	local x4, y4 = transform_point(transform, width, height)
+	local left = min(x1, x2, x3, x4)
+	local top = min(y1, y2, y3, y4)
+	local right = max(x1, x2, x3, x4)
+	local bottom = max(y1, y2, y3, y4)
+	return {
+		x = left,
+		y = top,
+		w = right - left,
+		h = bottom - top,
+	}
+end
+
 ---@param name string
 ---@return any
 local function use_provide(name)
@@ -526,17 +668,28 @@ local Ref = {}; do
 		if not owner.mounted then
 			return nil
 		end
-		local rect = rect_of(target)
-		local base = rect_of(owner)
-		if not rect or not base then
+		local target_node = target.node and target or target.render_node
+		local owner_node = owner.render_node
+		if not target_node or not owner_node then
 			return nil
 		end
-		return {
-			x = rect.x - base.x,
-			y = rect.y - base.y,
-			w = rect.w,
-			h = rect.h,
-		}
+		local target_world = target_node.world_transform
+		local owner_inverse = owner_node.inverse_transform
+		if target_world and owner_inverse then
+			local _, _, width, height = yoga.node_get(target_node.node)
+			return transform_rect(multiply_transform(owner_inverse, target_world), width, height)
+		end
+		local rect = rect_of(target)
+		local base = rect_of(owner)
+		if rect and base then
+			return {
+				x = rect.x - base.x,
+				y = rect.y - base.y,
+				w = rect.w,
+				h = rect.h,
+			}
+		end
+		return nil
 	end
 
 	---@return MiruRect?
@@ -858,6 +1011,92 @@ local Animation = {}; do
 	end
 end
 
+---@class (partial) MiruTransitionTrack
+local TransitionTrack = {}; do
+	TransitionTrack.__index = TransitionTrack
+
+	---@param target number
+	---@param complete boolean?
+	function TransitionTrack:jump(target, complete)
+		self.from = target
+		self.to = target
+		self.final_to = target
+		self.elapsed = 0
+		self.delay_remaining = 0
+		self.active = nil
+		apply_transition_value(self, target)
+		local on_complete = self.on_complete
+		self.on_complete = nil
+		if complete and on_complete then
+			on_complete(self)
+		end
+	end
+
+	---@param target number
+	function TransitionTrack:retarget(target)
+		if self.active and self.final_to == target then
+			return
+		end
+		local props = self.node.props or {}
+		local current = props[self.property]
+		assert(type(current) == "number", "Miru transition presentation must remain numeric")
+		if current == target then
+			self:jump(target, true)
+			return
+		end
+
+		local run_duration = self.duration
+		if self.active and target == self.from and self.run_duration > 0 then
+			run_duration = self.run_duration * clamp01(self.elapsed / self.run_duration)
+		end
+		if run_duration <= 0 then
+			self:jump(target, true)
+			return
+		end
+
+		self.from = current
+		self.to = target
+		self.final_to = target
+		self.elapsed = 0
+		self.run_duration = run_duration
+		self.delay_remaining = self.delay
+		self.active = true
+		self.view:add_animation(self)
+	end
+
+	---@param dt number
+	---@return boolean
+	function TransitionTrack:step(dt)
+		if self.stopped or not self.active then
+			return false
+		end
+		dt = max(dt, 0)
+		if self.delay_remaining > 0 then
+			local consumed = min(dt, self.delay_remaining)
+			self.delay_remaining = self.delay_remaining - consumed
+			dt = dt - consumed
+			if dt <= 0 then
+				return true
+			end
+		end
+
+		self.elapsed = min(self.elapsed + dt, self.run_duration)
+		local t = clamp01(self.elapsed / self.run_duration)
+		apply_transition_value(self, self.interpolate(self.from, self.to, self.easing(t)))
+		if t >= 1 then
+			self:jump(self.final_to, true)
+			return false
+		end
+		return true
+	end
+
+	function TransitionTrack:stop()
+		self.stopped = true
+		self.active = nil
+		self.on_complete = nil
+	end
+end
+
 ---@param batch MiruBatch
 ---@param item MiruCommand
 local function replay_command(batch, item)
@@ -944,6 +1183,9 @@ local View = {}; do
 		---@return number, number
 		function Component:origin()
 			local node = assert(self.render_node)
+			if node.world_transform then
+				return transform_point(node.world_transform, 0, 0)
+			end
 			local x, y = yoga.node_get(node.node)
 			return x, y
 		end
@@ -1094,7 +1336,23 @@ local View = {}; do
 
 	---@param instance MiruComponent
 	---@return boolean
+	local function instance_interactive(instance)
+		local node = instance.render_node
+		while node do
+			if node.interactive == false then
+				return false
+			end
+			node = node.parent
+		end
+		return true
+	end
+
+	---@param instance MiruComponent
+	---@return boolean
 	local function clickable_enabled(instance)
+		if not instance_interactive(instance) then
+			return false
+		end
 		local clickable = instance.clickable
 		if not clickable then
 			return false
@@ -1106,6 +1364,9 @@ local View = {}; do
 	---@param instance MiruComponent
 	---@return boolean
 	local function focusable_enabled(instance)
+		if not instance_interactive(instance) then
+			return false
+		end
 		local focusable = instance.focusable
 		if not focusable then
 			return false
@@ -1117,6 +1378,9 @@ local View = {}; do
 	---@param instance MiruComponent
 	---@return boolean
 	local function scrollable_enabled(instance)
+		if not instance_interactive(instance) then
+			return false
+		end
 		local scrollable = instance.scrollable
 		if not scrollable then
 			return false
@@ -1147,6 +1411,9 @@ local View = {}; do
 	---@param mode MiruHitMode
 	---@return boolean
 	local function instance_hittable(instance, mode)
+		if not instance_interactive(instance) then
+			return false
+		end
 		if mode == "target" then
 			return instance.targetable and true or false
 		elseif mode == "clickable" then
@@ -1260,6 +1527,12 @@ local View = {}; do
 	---@param button integer?
 	---@return MiruPointerEvent
 	local function pointer_event_at(target, current_target, x, y, button)
+		local node = current_target.render_node
+		local inverse = node and node.inverse_transform
+		if inverse then
+			local local_x, local_y = transform_point(inverse, x, y)
+			return pointer_event(target, current_target, local_x, local_y, x, y, button)
+		end
 		local ox, oy = current_target:origin()
 		return pointer_event(target, current_target, x - ox, y - oy, x, y, button)
 	end
@@ -1267,6 +1540,9 @@ local View = {}; do
 	---@param instance MiruComponent
 	---@return boolean
 	local function dismissable_enabled(instance)
+		if not instance_interactive(instance) then
+			return false
+		end
 		local dismissable = instance.dismissable
 		if not dismissable then
 			return false
@@ -1312,6 +1588,9 @@ local View = {}; do
 		end
 		if target.node then
 			---@cast target MiruRenderNode
+			if target.visual_rect then
+				return target.visual_rect
+			end
 			local x, y, w, h = yoga.node_get(target.node)
 			return {
 				x = x,
@@ -1322,6 +1601,9 @@ local View = {}; do
 		end
 		---@cast target MiruComponent
 		local node = assert(target.render_node)
+		if node.visual_rect then
+			return node.visual_rect
+		end
 		local x, y, w, h = yoga.node_get(node.node)
 		return {
 			x = x,
@@ -1355,10 +1637,24 @@ local View = {}; do
 	---@param mode MiruHitMode
 	---@return MiruComponent?, number?, number?
 	hit_render_node = function(node, x, y, mode)
-		local nx, ny, nw, nh = yoga.node_get(node.node)
+		if node.interactive == false then
+			return nil, nil, nil
+		end
+		local _, _, nw, nh = yoga.node_get(node.node)
+		local inverse = node.inverse_transform
+		if not inverse then
+			return nil, nil, nil
+		end
+		local local_x, local_y = transform_point(inverse, x, y)
 		local props = node.props
 		local clips_overflow = props and (props.overflow == "hidden" or props.overflow == "scroll")
-		local inside_clip = x >= nx and x <= nx + nw and y >= ny and y <= ny + nh
+		local inside_node = local_x >= 0 and local_x <= nw and local_y >= 0 and local_y <= nh
+		local clip_rect = node.visual_rect
+		local inside_clip = clip_rect
+			and x >= clip_rect.x
+			and x <= clip_rect.x + clip_rect.w
+			and y >= clip_rect.y
+			and y <= clip_rect.y + clip_rect.h
 		if clips_overflow and not inside_clip then
 			return nil, nil, nil
 		end
@@ -1370,11 +1666,9 @@ local View = {}; do
 			end
 		end
 		if node.kind == "component" and node.instance then
-			local lx = x - nx
-			local ly = y - ny
 			local component = node.instance
-			if lx >= 0 and lx <= nw and ly >= 0 and ly <= nh and instance_hittable(component, mode) then
-				return component, lx, ly
+			if inside_node and instance_hittable(component, mode) then
+				return component, local_x, local_y
 			end
 		end
 		return nil, nil, nil
@@ -1494,8 +1788,279 @@ local View = {}; do
 		return style
 	end
 
+	local numeric_transition_properties <const> = {
+		width = true,
+		height = true,
+		minWidth = true,
+		maxWidth = true,
+		minHeight = true,
+		maxHeight = true,
+		flex = true,
+		margin = true,
+		padding = true,
+		border = true,
+		gap = true,
+		top = true,
+		bottom = true,
+		left = true,
+		right = true,
+		aspectRatio = true,
+	}
+
+	local transform_transition_properties <const> = {
+		translateX = true,
+		translateY = true,
+		scale = true,
+		rotation = true,
+	}
+
+	local color_transition_properties <const> = {
+		background = true,
+		color = true,
+	}
+
+	---@param value any
+	---@return boolean
+	local function is_number(value)
+		return type(value) == "number"
+	end
+
+	---@param value any
+	---@return boolean
+	local function is_color(value)
+		return math.type(value) == "integer"
+	end
+
+	---@param value any
+	---@return boolean
+	local function is_positive_number(value)
+		return type(value) == "number" and value > 0
+	end
+
+	---@param a number
+	---@param b number
+	---@param t number
+	---@return number
+	local function lerp_rotation(a, b, t)
+		local two_pi <const> = math.pi * 2
+		local delta = (b - a + math.pi) % two_pi - math.pi
+		return a + delta * t
+	end
+
+	---@class MiruTransitionProperty
+	---@field interpolate fun(a: number, b: number, t: number): number
+	---@field validate fun(value: any): boolean
+	---@field layout boolean?
+
+	---@type table<string, MiruTransitionProperty?>
+	local transition_properties = {}
+	for name in pairs(numeric_transition_properties) do
+		transition_properties[name] = {
+			interpolate = lerp,
+			validate = is_number,
+			layout = true,
+		}
+	end
+	for name in pairs(transform_transition_properties) do
+		transition_properties[name] = {
+			interpolate = name == "rotation" and lerp_rotation or lerp,
+			validate = name == "scale" and is_positive_number or is_number,
+		}
+	end
+	for name in pairs(color_transition_properties) do
+		transition_properties[name] = {
+			interpolate = lerp_color,
+			validate = is_color,
+		}
+	end
+
+	---@param source table?
+	---@return table
+	local function copy_props(source)
+		local copy = {}
+		for key, value in pairs(source or {}) do
+			copy[key] = value
+		end
+		return copy
+	end
+
+	---@param node MiruRenderNode
+	---@return MiruComponent?
+	local function transition_owner(node)
+		return node.owner or node.instance
+	end
+
+	apply_transition_value = function(track, value)
+		if track.stopped then
+			return
+		end
+		local node = track.node
+		local props = node.props
+		if not props then
+			return
+		end
+		local current = props[track.property]
+		if type(current) == "number" and current == value then
+			return
+		end
+		props[track.property] = value
+		local property = assert(transition_properties[track.property])
+		if property.layout then
+			yoga.node_set(node.node, layout_style(props, node.direction))
+		end
+		local owner = transition_owner(node)
+		if owner and owner.mounted then
+			schedule_render_tree_compile(owner.view, root_instance(owner))
+		end
+	end
+
+	---@param spec table?
+	---@return table<string, true>, number, number, fun(t: number): number
+	local function transition_options(spec)
+		if spec == nil then
+			return {}, 0, 0, easings.out_cubic
+		end
+		assert(type(spec) == "table", "Miru transition must be a table")
+		local properties = assert(spec.properties, "Miru transition requires .properties")
+		assert(type(properties) == "table", "Miru transition .properties must be an array")
+		---@type table<string, true>
+		local selected = {}
+		for i = 1, #properties do
+			local name = properties[i]
+			assert(type(name) == "string", "Miru transition property names must be strings")
+			assert(transition_properties[name], "unsupported Miru transition property " .. name)
+			selected[name] = true
+		end
+		local duration = spec.duration == nil and 0.14 or spec.duration
+		local delay = spec.delay or 0
+		assert(type(duration) == "number" and duration >= 0, "Miru transition duration must be non-negative")
+		assert(type(delay) == "number" and delay >= 0, "Miru transition delay must be non-negative")
+		return selected, duration, delay, easing(spec)
+	end
+
+	---@param node MiruRenderNode
+	local function stop_transition_tracks(node)
+		local tracks = node.transition_tracks
+		if not tracks then
+			return
+		end
+		for property, track in pairs(tracks) do
+			track:stop()
+			tracks[property] = nil
+		end
+		node.transition_tracks = nil
+	end
+
+	---@param node MiruRenderNode
+	---@param desired table?
+	---@param direction string?
+	---@param is_new boolean
+	---@param override table?
+	---@param on_settled fun()?
+	local function patch_render_props(node, desired, direction, is_new, override, on_settled)
+		desired = desired or {}
+		local old_presented = node.props or {}
+		local presented = copy_props(desired)
+		local selected, duration, delay, curve = transition_options(override or desired.transition)
+		---@type table<string, MiruTransitionTrack>
+		local tracks = node.transition_tracks or {}
+
+		for property, track in pairs(tracks) do
+			track.on_complete = nil
+			if rawget(selected, property) then
+				presented[property] = old_presented[property]
+			else
+				track:stop()
+				tracks[property] = nil
+			end
+		end
+
+		node.direction = direction
+		node.props = presented
+		if not is_new then
+			for property in pairs(selected) do
+				local definition = assert(transition_properties[property])
+				local current = old_presented[property]
+				local target = desired[property]
+				local track = rawget(tracks, property)
+				if not definition.validate(current) or not definition.validate(target) then
+					if track then
+						track:stop()
+						tracks[property] = nil
+					end
+					presented[property] = target
+				elseif (track and track.final_to ~= target) or (current ~= target and (not track or not track.active)) then
+					if not track then
+						---@type MiruTransitionTrack
+						track = setmetatable({
+							view = assert(transition_owner(node)).view,
+							node = node,
+							property = property,
+							from = current,
+							to = current,
+							final_to = current,
+							elapsed = 0,
+							duration = duration,
+							run_duration = duration,
+							delay = delay,
+							delay_remaining = 0,
+							easing = curve,
+							interpolate = definition.interpolate,
+						}, TransitionTrack)
+						tracks[property] = track
+					else
+						track.duration = duration
+						track.delay = delay
+						track.easing = curve
+						track.interpolate = definition.interpolate
+					end
+					presented[property] = current
+					track:retarget(target)
+				elseif track and track.active then
+					presented[property] = current
+				end
+			end
+		end
+		node.transition_tracks = next(tracks) and tracks or nil
+		yoga.node_set(node.node, layout_style(presented, direction))
+
+		if not on_settled then
+			return
+		end
+		local remaining = 0
+		for property in pairs(selected) do
+			local track = rawget(tracks, property)
+			if track and track.active then
+				remaining = remaining + 1
+			end
+		end
+		if remaining == 0 then
+			on_settled()
+			return
+		end
+
+		local generation = (node.transition_generation or 0) + 1
+		node.transition_generation = generation
+		local function complete_track()
+			if node.transition_generation ~= generation then
+				return
+			end
+			remaining = remaining - 1
+			if remaining == 0 then
+				on_settled()
+			end
+		end
+		for property in pairs(selected) do
+			local track = rawget(tracks, property)
+			if track and track.active then
+				track.on_complete = complete_track
+			end
+		end
+	end
+
 	---@param node MiruRenderNode
 	function dispose_render_instances(node)
+		stop_transition_tracks(node)
 		bind_ref(node, nil, node)
 		if node.instance then
 			local instance = node.instance
@@ -1539,10 +2104,8 @@ local View = {}; do
 	---@param ctx MiruRenderContext
 	---@param kind string
 	---@param key any
-	---@param props table?
-	---@param direction string?
-	---@return MiruRenderNode
-	local function render_element(ctx, kind, key, props, direction)
+	---@return MiruRenderNode, boolean
+	local function reconcile_render_node(ctx, kind, key)
 		local parent = ctx.parent
 		local index = parent.cursor
 		parent.cursor = index + 1
@@ -1552,7 +2115,8 @@ local View = {}; do
 			remove_render_children_from(parent, index)
 			node = nil
 		end
-		if not node then
+		local is_new = not node
+		if is_new then
 			node = {
 				kind = kind,
 				key = key,
@@ -1564,9 +2128,20 @@ local View = {}; do
 			}
 			parent.children[index] = node
 		end
-		node.props = props
+		---@cast node MiruRenderNode
+		return node, is_new
+	end
+
+	---@param ctx MiruRenderContext
+	---@param kind string
+	---@param key any
+	---@param props table?
+	---@param direction string?
+	---@return MiruRenderNode
+	local function render_element(ctx, kind, key, props, direction)
+		local node, is_new = reconcile_render_node(ctx, kind, key)
+		patch_render_props(node, props, direction, is_new)
 		bind_ref(node, props and props.ref, node)
-		yoga.node_set(node.node, layout_style(props, direction))
 		return node
 	end
 
@@ -1582,6 +2157,219 @@ local View = {}; do
 		end
 		remove_render_children_from(node, node.cursor)
 		ctx.parent = prev
+	end
+
+	---@type table<string, true>
+	local presence_reserved_props <const> = {
+		show = true,
+		appear = true,
+		enter_from = true,
+		enter_to = true,
+		leave_to = true,
+		duration = true,
+		delay = true,
+		easing = true,
+		mode = true,
+		content_key = true,
+		on_after_enter = true,
+		on_after_leave = true,
+	}
+
+	---@param props table
+	---@return table
+	local function presence_base_props(props)
+		local base = {}
+		for key, value in pairs(props) do
+			if not presence_reserved_props[key] then
+				base[key] = value
+			end
+		end
+		return base
+	end
+
+	---@param target table
+	---@param values table?
+	local function merge_transition_values(target, values)
+		for key, value in pairs(values or {}) do
+			assert(transition_properties[key], "unsupported Miru transition property " .. tostring(key))
+			target[key] = value
+		end
+	end
+
+	---@param props table
+	---@return table
+	local function presence_transition_spec(props)
+		---@type table<string, true>
+		local selected = {}
+		local function collect(values)
+			for key in pairs(values or {}) do
+				assert(transition_properties[key], "unsupported Miru transition property " .. tostring(key))
+				selected[key] = true
+			end
+		end
+		collect(props.enter_from)
+		collect(props.enter_to)
+		collect(props.leave_to)
+		local properties = {}
+		for key in pairs(selected) do
+			properties[#properties + 1] = key
+		end
+		table.sort(properties)
+		return {
+			properties = properties,
+			duration = props.duration,
+			delay = props.delay,
+			easing = props.easing,
+		}
+	end
+
+	---@param props table
+	---@param values table?
+	---@return table
+	local function presence_visual_props(props, values)
+		local visual = presence_base_props(props)
+		merge_transition_values(visual, values)
+		return visual
+	end
+
+	---@param target_props table<any, any>
+	---@param spec table
+	---@return table?
+	local function presence_content_props(target_props, spec)
+		local animates_width
+		local animates_height
+		for i = 1, #spec.properties do
+			local property = spec.properties[i]
+			animates_width = animates_width or property == "width"
+			animates_height = animates_height or property == "height"
+		end
+		if not animates_width and not animates_height then
+			return nil
+		end
+
+		local content = {
+			position = "absolute",
+			width = animates_width and rawget(target_props, "width") or "100%",
+			height = animates_height and rawget(target_props, "height") or "100%",
+		}
+		local has_left
+		local has_right
+		local has_top
+		local has_bottom
+		for key in pairs(target_props) do
+			if key == "left" then
+				has_left = true
+			elseif key == "right" then
+				has_right = true
+			elseif key == "top" then
+				has_top = true
+			elseif key == "bottom" then
+				has_bottom = true
+			end
+		end
+		---@diagnostic disable-next-line
+		if animates_width and has_right and not has_left then
+			content.right = 0
+		else
+			content.left = 0
+		end
+		---@diagnostic disable-next-line
+		if animates_height and has_bottom and not has_top then
+			content.bottom = 0
+		else
+			content.top = 0
+		end
+		return content
+	end
+
+	---@param values table<any, any>
+	---@param spec table
+	---@return table
+	local function presence_branch_props(values, spec)
+		local branch = {
+			position = "absolute",
+			left = 0,
+			top = 0,
+			width = "100%",
+			height = "100%",
+		}
+		for i = 1, #spec.properties do
+			local property = spec.properties[i]
+			branch[property] = rawget(values, property)
+			if property == "width" or property == "height" then
+				branch.overflow = "hidden"
+			end
+		end
+		branch.transformOrigin = values.transformOrigin
+		branch.transformOriginX = values.transformOriginX
+		branch.transformOriginY = values.transformOriginY
+		return branch
+	end
+
+	---@param node MiruRenderNode
+	---@param props table
+	local function jump_render_props(node, props)
+		stop_transition_tracks(node)
+		node.props = copy_props(props)
+		yoga.node_set(node.node, layout_style(node.props, node.direction))
+	end
+
+	---@param node MiruRenderNode
+	---@param instance MiruComponent?
+	---@return boolean
+	local function transition_contains(node, instance)
+		local presence_id = assert(node.presence_id)
+		local current = instance and instance.render_node or nil
+		while current do
+			if current.presence_id == presence_id then
+				return true
+			end
+			current = current.parent
+		end
+		return false
+	end
+
+	---@param node MiruRenderNode
+	---@param interactive boolean
+	local function set_transition_interactive(node, interactive)
+		if node.interactive == interactive then
+			return
+		end
+		local owner = assert(transition_owner(node))
+		local view = owner.view
+		if not interactive then
+			if transition_contains(node, view.clickable_hovered_instance) then
+				set_clickable_hovered(view, nil, view.pointer_x, view.pointer_y)
+			end
+			if transition_contains(node, view.hovered_instance) then
+				set_hovered(view, nil)
+			end
+			if transition_contains(node, view.pressed_instance) then
+				local pressed = assert(view.pressed_instance)
+				local button = view.pressed_button
+				view.pressed_instance = nil
+				view.pressed_button = nil
+				set_state(pressed.pressed, false)
+				if pressed.mounted then
+					call_clickable(pressed, "on_pointer_up", pointer_event_at(
+						pressed, pressed, view.pointer_x or 0, view.pointer_y or 0, button))
+				end
+			end
+			if transition_contains(node, view.pressed_scrollable_instance) then
+				local pressed = assert(view.pressed_scrollable_instance)
+				local button = view.pressed_scrollable_button
+				view.pressed_scrollable_instance = nil
+				view.pressed_scrollable_button = nil
+				if pressed.mounted then
+					call_scrollable(pressed, "on_pointer_up", pointer_event_at(
+						pressed, pressed, view.pointer_x or 0, view.pointer_y or 0, button))
+				end
+			end
+			if transition_contains(node, view.focused_instance) then
+				set_focused(view, nil)
+			end
+		end
+		node.interactive = interactive
 	end
 
 	---@param component MiruComponent
@@ -2020,18 +2808,65 @@ local View = {}; do
 		return props.translateX or 0, props.translateY or 0, props.scale or 1, props.rotation or 0
 	end
 
+	---@param props table?
+	---@param width number
+	---@param height number
+	---@return number, number
+	local function draw_transform_origin(props, width, height)
+		if not props then
+			return 0, 0
+		end
+		if props.transformOrigin == "center" then
+			return width / 2, height / 2
+		end
+		assert(props.transformOrigin == nil, "Miru transformOrigin must be 'center'")
+		local x = props.transformOriginX or 0
+		local y = props.transformOriginY or 0
+		assert(type(x) == "number" and type(y) == "number", "Miru transform origin must be numeric")
+		return x, y
+	end
+
+	---@param x number
+	---@param y number
+	---@param scale number
+	---@param rotation number
+	---@param origin_x number
+	---@param origin_y number
+	---@return MiruTransform, number, number
+	local function local_draw_transform(x, y, scale, rotation, origin_x, origin_y)
+		local cosine = math.cos(rotation) * scale
+		local sine = math.sin(rotation) * scale
+		local c = -sine
+		local draw_x = x + origin_x - cosine * origin_x - c * origin_y
+		local draw_y = y + origin_y - sine * origin_x - cosine * origin_y
+		return {
+			a = cosine,
+			b = sine,
+			c = c,
+			d = cosine,
+			x = draw_x,
+			y = draw_y,
+		}, draw_x, draw_y
+	end
+
 	---@param node MiruRenderNode
 	---@param out MiruCommand[]
 	---@param parent_x number
 	---@param parent_y number
-	local function compile_render_node(node, out, parent_x, parent_y)
+	---@param parent_transform MiruTransform
+	local function compile_render_node(node, out, parent_x, parent_y, parent_transform)
 		local x, y, w, h = yoga.node_get(node.node)
 		local local_x = x - parent_x
 		local local_y = y - parent_y
 		local props = node.props
 		local translate_x, translate_y, scale, rotation = draw_transform(props)
-		local draw_x = local_x + translate_x
-		local draw_y = local_y + translate_y
+		local origin_x, origin_y = draw_transform_origin(props, w, h)
+		local local_transform, draw_x, draw_y = local_draw_transform(
+			local_x + translate_x, local_y + translate_y, scale, rotation, origin_x, origin_y)
+		local world_transform = multiply_transform(parent_transform, local_transform)
+		node.world_transform = world_transform
+		node.inverse_transform = inverse_transform(world_transform)
+		node.visual_rect = transform_rect(world_transform, w, h)
 		if node.kind == "component" or node.kind == "slot" then
 			set_instance_layout(assert(node.instance), 0, 0, w, h)
 		end
@@ -2049,16 +2884,15 @@ local View = {}; do
 		end
 		local clips_overflow = props
 			and (props.overflow == "hidden" or props.overflow == "scroll")
-			and w > 0
-			and h > 0
 			and (node.kind == "text" or node.kind == "canvas" or #node.children > 0)
-		if clips_overflow then
+		local clips_all = clips_overflow and (w <= 0 or h <= 0)
+		if clips_overflow and not clips_all then
 			out[#out + 1] = command("add", matclip.rect(w, h), 0, 0)
 		end
-		if node.kind == "text" then
+		if node.kind == "text" and not clips_all then
 			out[#out + 1] = text_command(node, w, h)
 		end
-		if node.kind == "canvas" then
+		if node.kind == "canvas" and not clips_all then
 			if props and props.live then
 				out[#out + 1] = {
 					name = "canvas",
@@ -2078,10 +2912,28 @@ local View = {}; do
 				end
 			end
 		end
-		for i = 1, #node.children do
-			compile_render_node(node.children[i], out, x, y)
+		if not clips_all then
+			local active_branch_slot = node.active_branch_slot
+			if active_branch_slot then
+				for i = 1, #node.children do
+					local child = node.children[i]
+					if child.branch_slot ~= active_branch_slot then
+						compile_render_node(child, out, x, y, world_transform)
+					end
+				end
+				for i = 1, #node.children do
+					local child = node.children[i]
+					if child.branch_slot == active_branch_slot then
+						compile_render_node(child, out, x, y, world_transform)
+					end
+				end
+			else
+				for i = 1, #node.children do
+					compile_render_node(node.children[i], out, x, y, world_transform)
+				end
+			end
 		end
-		if clips_overflow then
+		if clips_overflow and not clips_all then
 			out[#out + 1] = command("add", matclip.rect())
 		end
 		out[#out + 1] = command "layer"
@@ -2115,7 +2967,7 @@ local View = {}; do
 				drawing = true,
 			}
 		end
-		compile_render_node(root, out, 0, 0)
+		compile_render_node(root, out, 0, 0, IDENTITY_TRANSFORM)
 		active = prev
 		return out
 	end
@@ -2154,7 +3006,7 @@ local View = {}; do
 			view.dirty_roots[root] = true
 			view.dirty_root_order[#view.dirty_root_order + 1] = root
 		end
-		if not view.scope.flushing then
+		if not view.scope.flushing and not view.stepping_animations then
 			flush_dirty_roots(view)
 		end
 	end
@@ -2395,6 +3247,461 @@ local View = {}; do
 		return node
 	end
 
+	---@param props table
+	---@param children fun(key: any)?
+	---@return MiruRenderNode
+	function View:render_transition(props, children)
+		local ctx = assert(active_render)
+		assert(type(props) == "table", "Miru transition requires props")
+		local mode = props.mode or "out_in"
+		if mode == "out-in" then
+			mode = "out_in"
+		elseif mode == "in-out" then
+			mode = "in_out"
+		end
+		assert(mode == "out_in" or mode == "in_out" or mode == "simultaneous",
+			"Miru transition mode must be 'out_in', 'in_out', or 'simultaneous'")
+
+		local node, is_new = reconcile_render_node(ctx, "transition", props.key)
+		if is_new then
+			self.presence_sequence = self.presence_sequence + 1
+			node.presence_id = self.presence_sequence
+		end
+		assert(type(props.show) == "boolean", "Miru transition requires boolean .show")
+		local show = props.show
+		local content_key = props.content_key
+		local content_key_type = type(content_key)
+		assert(
+			content_key_type == "nil"
+				or content_key_type == "string"
+				or content_key_type == "number"
+				or content_key_type == "boolean",
+			"Miru transition content_key must be a scalar"
+		)
+		local spec = presence_transition_spec(props)
+		local target_props = presence_visual_props(props, props.enter_to)
+		local enter_props = presence_visual_props(props, props.enter_from or props.leave_to)
+		local leave_props = presence_visual_props(props, props.leave_to or props.enter_from)
+		local content_props = presence_content_props(target_props, spec)
+		local branch_target_props = presence_branch_props(target_props, spec)
+		local branch_enter_props = presence_branch_props(enter_props, spec)
+		local branch_leave_props = presence_branch_props(leave_props, spec)
+		for i = 1, #spec.properties do
+			local property = spec.properties[i]
+			local definition = assert(rawget(transition_properties, property))
+			assert(definition.validate(rawget(target_props, property)),
+				"Miru presence transition requires a compatible target for " .. property)
+			assert(definition.validate(rawget(enter_props, property)),
+				"Miru presence transition requires a compatible enter value for " .. property)
+			assert(definition.validate(rawget(leave_props, property)),
+				"Miru presence transition requires a compatible leave value for " .. property)
+		end
+
+		bind_ref(node, props.ref, node)
+		local state = node.transition_state
+		if is_new then
+			---@type MiruPresencePhase
+			local initial_phase = show and props.appear and "entering" or show and "entered" or "left"
+			local owner = assert(transition_owner(node))
+			---@cast content_key MiruPresenceKey?
+			---@type MiruValue<integer>
+			local active_slot = owner.view.scope:value(1)
+			---@type MiruPresenceSwitchPhase
+			local initial_switch_phase = "idle"
+			---@type MiruValue<MiruPresenceSwitchPhase>
+			local switch_phase = owner.view.scope:value(initial_switch_phase)
+			---@type MiruPresenceBranchState
+			local branch_one = {
+				key = owner.view.scope:value(content_key),
+				mounted = owner.view.scope:value(show),
+				revision = 1,
+				enter_generation = 0,
+			}
+			---@type MiruValue<MiruPresenceKey?>
+			local empty_key = owner.view.scope:value(nil)
+			---@type MiruPresenceBranchState
+			local branch_two = {
+				key = empty_key,
+				mounted = owner.view.scope:value(false),
+				revision = 0,
+				enter_generation = 0,
+			}
+			---@type MiruPresenceState
+			state = {
+				phase = owner.view.scope:value(initial_phase),
+				active_key = owner.view.scope:value(content_key),
+				active_slot = active_slot,
+				switch_phase = switch_phase,
+				branch_one = branch_one,
+				branch_two = branch_two,
+				generation = 0,
+				switch_generation = 0,
+				switch_remaining = 0,
+				switch_enter_done = false,
+				switch_leave_done = false,
+				switch_mode = mode,
+			}
+			node.transition_state = state
+			node.direction = nil
+			jump_render_props(node, initial_phase == "entering" and enter_props or show and target_props or leave_props)
+			set_transition_interactive(node, show)
+		end
+		---@cast state MiruPresenceState
+
+		---@param slot integer
+		---@return MiruPresenceBranchState
+		local function branch_for_slot(slot)
+			if slot == 1 then
+				return state.branch_one
+			end
+			assert(slot == 2)
+			return state.branch_two
+		end
+
+		---@param key MiruPresenceKey?
+		local function prepare_active_key(key)
+			state.switch_generation = state.switch_generation + 1
+			state.switch_phase("idle")
+			state.switch_remaining = 0
+			state.switch_enter_done = false
+			state.switch_leave_done = false
+			local active_slot = state.active_slot()
+			local active_branch = branch_for_slot(active_slot)
+			if active_branch.key() ~= key then
+				active_branch.key(key)
+				active_branch.revision = active_branch.revision + 1
+			end
+			active_branch.enter_generation = 0
+			active_branch.mounted(true)
+			branch_for_slot(3 - active_slot).mounted(false)
+			state.active_key(key)
+		end
+
+		local function cancel_key_switch()
+			if state.switch_phase() == "idle" then
+				return
+			end
+			state.switch_generation = state.switch_generation + 1
+			state.switch_phase("idle")
+			state.switch_remaining = 0
+			state.switch_enter_done = false
+			state.switch_leave_done = false
+			local active_slot = state.active_slot()
+			branch_for_slot(active_slot).enter_generation = 0
+			branch_for_slot(3 - active_slot).mounted(false)
+		end
+
+		---@param key MiruPresenceKey?
+		local function start_key_switch(key)
+			state.switch_generation = state.switch_generation + 1
+			local generation = state.switch_generation
+			local outgoing_slot = state.active_slot()
+			local incoming_slot = 3 - outgoing_slot
+			local incoming_branch = branch_for_slot(incoming_slot)
+			incoming_branch.key(key)
+			incoming_branch.mounted(true)
+			incoming_branch.revision = incoming_branch.revision + 1
+			incoming_branch.enter_generation = generation
+			state.active_slot(incoming_slot)
+			state.active_key(key)
+			state.switch_mode = mode
+			state.switch_phase(mode == "in_out" and "entering" or "simultaneous")
+			state.switch_remaining = mode == "simultaneous" and 2 or 1
+			state.switch_enter_done = false
+			state.switch_leave_done = false
+		end
+
+		local function finish_simultaneous_step()
+			state.switch_remaining = state.switch_remaining - 1
+			if state.switch_remaining == 0 then
+				state.switch_phase("idle")
+			end
+		end
+
+		---@param generation integer
+		---@param slot integer
+		---@param key MiruPresenceKey?
+		---@return fun()
+		local function finish_switch_enter(generation, slot, key)
+			return function()
+				local branch = branch_for_slot(slot)
+				if state.switch_generation ~= generation
+					or state.switch_enter_done
+					or state.active_slot() ~= slot
+					or branch.key() ~= key
+				then
+					return
+				end
+				state.switch_enter_done = true
+				local callback = props.on_after_enter
+				if callback then
+					callback(key)
+				end
+				if state.switch_mode == "in_out" then
+					state.switch_phase("leaving")
+				else
+					finish_simultaneous_step()
+				end
+			end
+		end
+
+		---@param generation integer
+		---@param slot integer
+		---@param key MiruPresenceKey?
+		---@return fun()
+		local function finish_switch_leave(generation, slot, key)
+			return function()
+				local branch = branch_for_slot(slot)
+				if state.switch_generation ~= generation
+					or state.switch_leave_done
+					or state.active_slot() == slot
+					or branch.key() ~= key
+				then
+					return
+				end
+				state.switch_leave_done = true
+				branch.mounted(false)
+				local callback = props.on_after_leave
+				if callback then
+					callback(key)
+				end
+				if state.switch_mode == "simultaneous" then
+					finish_simultaneous_step()
+				else
+					state.switch_phase("idle")
+				end
+			end
+		end
+
+		---@param slot integer
+		local function render_key_branch(slot)
+			local branch = branch_for_slot(slot)
+			local branch_node, branch_is_new = reconcile_render_node(ctx, "transition_branch", slot)
+			if branch_is_new then
+				self.presence_sequence = self.presence_sequence + 1
+				branch_node.presence_id = self.presence_sequence
+			end
+			branch_node.branch_slot = slot
+			local mounted = branch.mounted()
+			if not mounted then
+				jump_render_props(branch_node, branch_leave_props)
+				set_transition_interactive(branch_node, false)
+				remove_render_children_from(branch_node, 1)
+				return
+			end
+
+			local active_slot = state.active_slot()
+			local is_active = slot == active_slot
+			local revision_changed = branch_node.branch_revision ~= branch.revision
+			if revision_changed then
+				branch_node.branch_revision = branch.revision
+				if is_active
+					and branch.enter_generation == state.switch_generation
+					and state.switch_phase() ~= "idle"
+				then
+					jump_render_props(branch_node, branch_enter_props)
+				else
+					jump_render_props(branch_node, branch_target_props)
+				end
+			end
+			set_transition_interactive(branch_node,
+				show and state.phase() ~= "leaving" and is_active)
+			render_children(ctx, branch_node, children and function()
+				children(branch.key())
+			end or nil)
+
+			if state.phase() ~= "entered" then
+				jump_render_props(branch_node, branch_target_props)
+				return
+			end
+			local switch_phase = state.switch_phase()
+			local generation = state.switch_generation
+			local key = branch.key()
+			if switch_phase == "simultaneous" then
+				if is_active then
+					patch_render_props(branch_node, branch_target_props, nil, false, spec,
+						finish_switch_enter(generation, slot, key))
+				else
+					patch_render_props(branch_node, branch_leave_props, nil, false, spec,
+						finish_switch_leave(generation, slot, key))
+				end
+			elseif switch_phase == "entering" and is_active then
+				patch_render_props(branch_node, branch_target_props, nil, false, spec,
+					finish_switch_enter(generation, slot, key))
+			elseif switch_phase == "leaving" and not is_active then
+				patch_render_props(branch_node, branch_leave_props, nil, false, spec,
+					finish_switch_leave(generation, slot, key))
+			else
+				patch_render_props(branch_node, branch_target_props, nil, false, spec)
+			end
+		end
+
+		local function render_active_children()
+			if state.phase() == "left" then
+				node.active_branch_slot = nil
+				remove_render_children_from(node, 1)
+				return
+			end
+			if mode ~= "out_in" then
+				node.active_branch_slot = state.active_slot()
+				local previous_parent = ctx.parent
+				ctx.parent = node
+				node.cursor = 1
+				render_key_branch(1)
+				render_key_branch(2)
+				remove_render_children_from(node, node.cursor)
+				ctx.parent = previous_parent
+				return
+			end
+
+			node.active_branch_slot = nil
+			local render_content = children and function()
+				children(state.active_key())
+			end or nil
+			if not content_props then
+				render_children(ctx, node, render_content)
+				return
+			end
+
+			local previous_parent = ctx.parent
+			ctx.parent = node
+			node.cursor = 1
+			local content_node, content_is_new = reconcile_render_node(ctx, "transition_content", nil)
+			patch_render_props(content_node, content_props, nil, content_is_new)
+			render_children(ctx, content_node, render_content)
+			remove_render_children_from(node, node.cursor)
+			ctx.parent = previous_parent
+		end
+
+		local function finish_enter(generation)
+			return function()
+				if state.generation ~= generation or state.phase() ~= "entering" then
+					return
+				end
+				state.phase("entered")
+				local callback = props.on_after_enter
+				if callback then
+					callback(state.active_key())
+				end
+			end
+		end
+
+		local function finish_leave(generation)
+			return function()
+				if state.generation ~= generation or state.phase() ~= "leaving" then
+					return
+				end
+				remove_render_children_from(node, 1)
+				state.phase("left")
+				local callback = props.on_after_leave
+				if callback then
+					callback(state.active_key())
+				end
+			end
+		end
+
+		local function begin_enter(from_left)
+			state.generation = state.generation + 1
+			state.phase("entering")
+			set_transition_interactive(node, true)
+			if from_left then
+				jump_render_props(node, enter_props)
+			end
+			render_active_children()
+			patch_render_props(node, target_props, nil, false, spec, finish_enter(state.generation))
+		end
+
+		local function begin_leave()
+			state.generation = state.generation + 1
+			state.phase("leaving")
+			set_transition_interactive(node, false)
+			render_active_children()
+			patch_render_props(node, leave_props, nil, false, spec, finish_leave(state.generation))
+		end
+
+		if not is_new and mode ~= state.switch_mode then
+			assert(state.switch_phase() == "idle", "Miru transition mode cannot change during a key switch")
+			state.switch_mode = mode
+			if mode ~= "out_in" then
+				prepare_active_key(state.active_key())
+			end
+		end
+
+		if is_new then
+			if state.phase() == "entering" then
+				render_active_children()
+				patch_render_props(node, target_props, nil, false, spec, finish_enter(state.generation))
+			elseif state.phase() == "entered" then
+				render_active_children()
+			else
+				remove_render_children_from(node, 1)
+			end
+			return node
+		end
+
+		if state.phase() == "left" then
+			if show then
+				if mode == "out_in" then
+					state.active_key(content_key)
+				else
+					prepare_active_key(content_key)
+				end
+				begin_enter(true)
+			else
+				jump_render_props(node, leave_props)
+				remove_render_children_from(node, 1)
+			end
+			return node
+		end
+
+		if show and content_key ~= state.active_key() then
+			if mode == "out_in" then
+				if state.phase() == "leaving" then
+					render_active_children()
+					patch_render_props(node, leave_props, nil, false, spec, finish_leave(state.generation))
+				else
+					begin_leave()
+				end
+			else
+				start_key_switch(content_key)
+				if state.phase() == "leaving" then
+					begin_enter(false)
+				elseif state.phase() == "entering" then
+					render_active_children()
+					patch_render_props(node, target_props, nil, false, spec, finish_enter(state.generation))
+				else
+					render_active_children()
+					patch_render_props(node, target_props, nil, false, spec)
+				end
+			end
+			return node
+		end
+
+		if not show then
+			if mode ~= "out_in" then
+				cancel_key_switch()
+			end
+			if state.phase() == "leaving" then
+				render_active_children()
+				patch_render_props(node, leave_props, nil, false, spec, finish_leave(state.generation))
+			else
+				begin_leave()
+			end
+			return node
+		end
+
+		if state.phase() == "leaving" then
+			begin_enter(false)
+		elseif state.phase() == "entering" then
+			render_active_children()
+			patch_render_props(node, target_props, nil, false, spec, finish_enter(state.generation))
+		else
+			render_active_children()
+			patch_render_props(node, target_props, nil, false, spec)
+		end
+		return node
+	end
+
 	---@param props table?
 	---@param draw fun(width: number, height: number)?
 	---@return MiruRenderNode
@@ -2435,6 +3742,7 @@ local View = {}; do
 			remove_render_children_from(parent, index)
 			node = nil
 		end
+		local is_new = not node
 		if not node then
 			node = {
 				kind = "component",
@@ -2451,11 +3759,11 @@ local View = {}; do
 		else
 			patch_props(assert(node.instance), props)
 		end
+		---@cast node MiruRenderNode
 		local component = assert(node.instance)
 		component.render_node = node
-		node.props = component.props
 		bind_ref(component, props and props.ref, component)
-		yoga.node_set(node.node, layout_style(props))
+		patch_render_props(node, component.props, nil, is_new)
 		return component.public
 	end
 
@@ -2514,7 +3822,7 @@ local View = {}; do
 		return component.public
 	end
 
-	---@param animation MiruAnimation
+	---@param animation MiruAnimation|MiruTransitionTrack
 	function View:add_animation(animation)
 		if animation.listed then
 			return
@@ -2526,6 +3834,7 @@ local View = {}; do
 
 	---@param dt number
 	local function step_animations(self, dt)
+		self.stepping_animations = true
 		local animations = self.animations
 		local i = 1
 		while i <= #animations do
@@ -2538,6 +3847,7 @@ local View = {}; do
 				i = i + 1
 			end
 		end
+		self.stepping_animations = nil
 	end
 
 	---@param dt number?
@@ -2772,6 +4082,7 @@ function M.new(args)
 		animations = {},
 		dismissables = {},
 		effect_order = 0,
+		presence_sequence = 0,
 		dirty_roots = {},
 		dirty_root_order = {},
 		stats = {
@@ -3076,6 +4387,14 @@ end
 ---@return MiruRenderNode
 function M.box(props, children)
 	return element(props, children)
+end
+
+---@param props table
+---@param children fun(key: any)?
+---@return MiruRenderNode
+function M.transition(props, children)
+	local ctx = assert(active_render, "transition can only be used while rendering")
+	return ctx.view:render_transition(props, children)
 end
 
 ---@param props table?
